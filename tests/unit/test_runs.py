@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ from morning_radio.models import StageStatus
 
 
 def test_run_ids_match_format_and_are_unique() -> None:
-    now = datetime(2026, 8, 14, 6, 15, 3)
+    now = datetime(2026, 8, 14, 6, 15, 3, tzinfo=UTC)
     first = generate_run_id(now)
     second = generate_run_id(now)
     assert re.match(r"^20260814T061503-[0-9a-f]{6}$", first)

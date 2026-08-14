@@ -4,7 +4,6 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY,

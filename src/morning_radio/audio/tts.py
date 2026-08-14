@@ -44,7 +44,7 @@ def _write_tone_wav(path: Path, duration_seconds: float, sample_rate: int = 4410
 def kokoro_importable() -> bool:
     try:
         __import__("kokoro")
-    except Exception:
+    except ImportError:
         return False
     return True
 

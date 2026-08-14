@@ -5,4 +5,10 @@ if command -v uv >/dev/null 2>&1; then
   exec uv run morning-radio "$@"
 fi
 
+for uv_path in "$HOME/.local/bin/uv" "$HOME/Library/Python/3.9/bin/uv"; do
+  if [ -x "$uv_path" ]; then
+    exec "$uv_path" run morning-radio "$@"
+  fi
+done
+
 PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src" exec python3 -m morning_radio.cli "$@"

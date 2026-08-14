@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 from datetime import date, datetime
-from pathlib import Path
 from typing import Annotated
 
 import httpx
@@ -14,7 +14,7 @@ from rich.console import Console
 
 from morning_radio import db
 from morning_radio.audio.tts import kokoro_importable
-from morning_radio.profile.compiler import ProfileError, load_profile, profile_path
+from morning_radio.profile.compiler import ProfileError, load_profile
 from morning_radio.profile.feedback import record_feedback
 from morning_radio.profile.interview import run_interview
 from morning_radio.settings import (
@@ -76,7 +76,7 @@ def doctor() -> None:
     try:
         db.initialize(base / "data" / "app.db")
         checks.append(("SQLite initialization", True, "data/app.db ready"))
-    except Exception as exc:
+    except sqlite3.Error as exc:
         checks.append(("SQLite initialization", False, str(exc)))
 
     if app_settings is not None:
@@ -87,7 +87,7 @@ def doctor() -> None:
             model_found = app_settings.llm.model in names
             checks.append(("Ollama reachable", True, str(app_settings.llm.base_url)))
             checks.append(("Configured LLM model", model_found, app_settings.llm.model))
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, ValueError) as exc:
             checks.append(("Ollama reachable", False, str(exc)))
             checks.append(("Configured LLM model", False, app_settings.llm.model))
 
