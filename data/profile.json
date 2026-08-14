@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-14T00:00:00-04:00",
+  "updated_at": "2026-08-14T00:00:00-04:00",
+  "location": {
+    "home": "Buffalo, NY",
+    "local_scope": "Western New York"
+  },
+  "interests": [
+    {
+      "name": "Artificial intelligence",
+      "priority": 5,
+      "depth": "deep",
+      "subtopics": [
+        "AI products",
+        "software development",
+        "AI companies and business"
+      ],
+      "inclusion_notes": "Include meaningful developments that affect builders.",
+      "exclusion_notes": "Do not include trivial benchmark churn."
+    },
+    {
+      "name": "Apple developer ecosystem",
+      "priority": 4,
+      "depth": "normal",
+      "subtopics": [
+        "macOS",
+        "Swift",
+        "developer tools"
+      ],
+      "inclusion_notes": "Include changes that affect working developers.",
+      "exclusion_notes": "Skip rumor-only coverage."
+    },
+    {
+      "name": "Buffalo and Western New York",
+      "priority": 4,
+      "depth": "normal",
+      "subtopics": [
+        "local government",
+        "weather",
+        "Buffalo Bills"
+      ],
+      "inclusion_notes": "Include local stories with practical impact.",
+      "exclusion_notes": "Avoid routine sports practice filler unless it changes the outlook."
+    }
+  ],
+  "global_news": {
+    "include_major_us": true,
+    "include_major_world": true,
+    "threshold": "major_only"
+  },
+  "negative_preferences": [
+    "celebrity news",
+    "entertainment gossip"
+  ],
+  "editorial_style": {
+    "context_level": "analysis",
+    "assume_subject_familiarity": true,
+    "ongoing_story_policy": "changes_only",
+    "tone": "conversational_intelligent",
+    "avoid_padding": true
+  },
+  "show_format": {
+    "target_minutes": 25,
+    "minimum_minutes": 15,
+    "maximum_minutes": 30,
+    "allow_variable_length": true,
+    "headline_open": true,
+    "watch_list_close": true,
+    "host_count": 1
+  },
+  "voice_preferences": {
+    "primary_voice": null,
+    "secondary_voice": null,
+    "pace": "normal"
+  }
+}
