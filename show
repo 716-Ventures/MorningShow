@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv run morning-radio "$@"
+fi
+
+PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src" exec python3 -m morning_radio.cli "$@"

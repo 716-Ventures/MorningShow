@@ -1,0 +1,17 @@
+tts:
+  engine: kokoro
+  voice: null
+  secondary_voice: null
+  speed: 1.0
+
+audio:
+  bitrate_kbps: 128
+  sample_rate_hz: 44100
+  channels: 2
+  loudness_target_lufs: -16
+
+assets:
+  opening_optional: true
+  closing_optional: true
+  bumpers_optional: true
+  beds_optional: true

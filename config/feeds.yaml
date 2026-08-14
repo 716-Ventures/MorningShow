@@ -1,0 +1,44 @@
+# Starter public feeds. Feed failures are warnings; edit this list for your listening diet.
+feeds:
+  - id: npr-news
+    name: NPR News
+    url: https://feeds.npr.org/1001/rss.xml
+    enabled: true
+    category_hints: [general, us, world]
+    geography_hints: []
+    priority: 4
+  - id: bbc-world
+    name: BBC World
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    enabled: true
+    category_hints: [general, world]
+    geography_hints: []
+    priority: 4
+  - id: the-verge
+    name: The Verge
+    url: https://www.theverge.com/rss/index.xml
+    enabled: true
+    category_hints: [technology, ai, apple]
+    geography_hints: []
+    priority: 4
+  - id: techcrunch
+    name: TechCrunch
+    url: https://techcrunch.com/feed/
+    enabled: true
+    category_hints: [technology, startups, ai]
+    geography_hints: []
+    priority: 3
+  - id: buffalo-news-local
+    name: Buffalo News Local
+    url: https://buffalonews.com/search/?f=rss&t=article&c=news/local
+    enabled: true
+    category_hints: [local]
+    geography_hints: [Buffalo, Western New York]
+    priority: 4
+  - id: espn-bills
+    name: ESPN Buffalo Bills
+    url: https://www.espn.com/espn/rss/nfl/news
+    enabled: true
+    category_hints: [sports, nfl, bills]
+    geography_hints: [Buffalo]
+    priority: 2

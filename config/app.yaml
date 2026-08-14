@@ -1,0 +1,22 @@
+llm:
+  base_url: http://localhost:11434
+  model: qwen3:30b
+  timeout_seconds: 300
+
+news:
+  request_timeout_seconds: 15
+  max_html_bytes: 5242880
+  minimum_article_words: 200
+  minimum_usable_articles: 10
+  candidate_max_age_hours: 36
+  max_candidates: 500
+  max_articles_to_extract: 150
+  concurrency: 8
+
+selection:
+  major_news_importance_threshold: 85
+  dossier_source_preference: 2
+  maximum_selected_stories: 12
+
+verification:
+  maximum_correction_cycles: 2
