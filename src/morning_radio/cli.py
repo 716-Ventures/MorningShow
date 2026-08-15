@@ -13,7 +13,7 @@ import typer
 from rich.console import Console
 
 from morning_radio import db
-from morning_radio.audio.tts import kokoro_importable
+from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
 from morning_radio.profile.compiler import ProfileError, load_profile
 from morning_radio.profile.feedback import record_feedback
 from morning_radio.profile.interview import run_interview
@@ -106,7 +106,16 @@ def doctor() -> None:
     try:
         prod = load_production_settings(base)
         if prod.tts.engine == "kokoro":
-            checks.append(("TTS backend", kokoro_importable(), "kokoro import"))
+            importable = kokoro_importable()
+            checks.append(("TTS backend", importable, "kokoro import"))
+            if importable:
+                try:
+                    adapter = build_tts_adapter(prod.tts.engine)
+                    voices = adapter.available_voices()
+                    voice = prod.tts.voice or "af_heart"
+                    checks.append(("Configured TTS voice", voice in voices, voice))
+                except RuntimeError as exc:
+                    checks.append(("Configured TTS voice", False, str(exc)))
         else:
             checks.append(("TTS backend", True, prod.tts.engine))
     except ConfigError as exc:

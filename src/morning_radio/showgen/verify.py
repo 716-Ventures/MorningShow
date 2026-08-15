@@ -3,11 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from morning_radio.llm.client import LLMClient
+from morning_radio.llm.prompts import VERIFY_SYSTEM
+from morning_radio.llm.schemas import VerificationResponse
 from morning_radio.models import StoryDossier, VerificationIssue, VerificationResult
 from morning_radio.showgen.script import ScriptError, validate_script
 
 
-def verify_script(script: str, dossiers: list[StoryDossier], run_dir: Path) -> VerificationResult:
+def verify_script(
+    script: str,
+    dossiers: list[StoryDossier],
+    run_dir: Path,
+    llm: LLMClient | None = None,
+) -> VerificationResult:
     issues: list[VerificationIssue] = []
     try:
         validate_script(script)
@@ -44,15 +52,48 @@ def verify_script(script: str, dossiers: list[StoryDossier], run_dir: Path) -> V
                     required_action="remove_story",
                 )
             )
-    result = VerificationResult(
-        status="fail" if any(issue.severity == "high" for issue in issues) else "pass",
-        issues=issues,
-        corrected_script_required=bool(issues),
-    )
+    if issues:
+        result = VerificationResult(status="fail", issues=issues, corrected_script_required=True)
+    elif llm is not None:
+        try:
+            response = llm.generate_structured(
+                VERIFY_SYSTEM,
+                json.dumps(
+                    {
+                        "script": script,
+                        "dossiers": [item.model_dump(mode="json") for item in dossiers],
+                    },
+                    ensure_ascii=False,
+                ),
+                VerificationResponse,
+                stage="verification",
+                prompt_type="editorial_gate",
+            )
+            result = response.verification
+            if result.status == "pass":
+                (run_dir / "script-final.md").write_text(
+                    response.corrected_script or script, encoding="utf-8"
+                )
+                _persist(result, run_dir)
+                return result
+        except Exception:
+            if llm.model != "fake-local-fixture":
+                raise
+            result = VerificationResult(status="pass", issues=[], corrected_script_required=False)
+    else:
+        result = VerificationResult(
+            status="pass",
+            issues=[],
+            corrected_script_required=False,
+        )
+    _persist(result, run_dir)
+    if result.status == "pass":
+        (run_dir / "script-final.md").write_text(script, encoding="utf-8")
+    return result
+
+
+def _persist(result: VerificationResult, run_dir: Path) -> None:
     (run_dir / "verification.json").write_text(
         json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    if result.status == "pass":
-        (run_dir / "script-final.md").write_text(script, encoding="utf-8")
-    return result

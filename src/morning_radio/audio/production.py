@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
-from morning_radio.audio.tts import ToneTTS
+from morning_radio.audio.tts import build_tts_adapter
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
@@ -15,17 +16,21 @@ def synthesize_script(
 ) -> list[AudioMetadata]:
     voice = production.tts.voice or "tone"
     secondary = production.tts.secondary_voice or voice
-    adapter = ToneTTS()
+    adapter = build_tts_adapter(production.tts.engine)
+    available = set(adapter.available_voices())
     manifest: list[AudioMetadata] = []
     for index, (host, text) in enumerate(spoken_blocks(script), start=1):
         selected_voice = secondary if host == "HOST 2" else voice
-        if selected_voice != "tone":
-            raise RuntimeError(
-                f"Configured voice '{selected_voice}' is unavailable in fallback TTS. "
-                "Install Kokoro or set config/production.yaml tts.voice to null."
-            )
+        if (
+            production.tts.engine == "kokoro"
+            and selected_voice == "tone"
+            and os.environ.get("MORNING_RADIO_FAKE_TTS") != "1"
+        ):
+            selected_voice = "af_heart"
+        if selected_voice not in available:
+            raise RuntimeError(f"Configured voice '{selected_voice}' is unavailable.")
         path = run_dir / "raw-audio" / f"{index:03d}-{host.lower().replace(' ', '-')}.wav"
-        manifest.append(adapter.synthesize(text, "tone", path, speed=production.tts.speed))
+        manifest.append(adapter.synthesize(text, selected_voice, path, speed=production.tts.speed))
     (run_dir / "raw-audio" / "manifest.json").write_text(
         json.dumps([item.model_dump(mode="json") for item in manifest], indent=2) + "\n",
         encoding="utf-8",

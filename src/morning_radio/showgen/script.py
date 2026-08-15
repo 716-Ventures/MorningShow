@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
+from morning_radio.llm.client import LLMClient
+from morning_radio.llm.prompts import SCRIPT_SYSTEM
 from morning_radio.models import EditorialProfile, Rundown, StoryDossier
 
 ALLOWED_DIRECTIVES = {"MUSIC", "BUMPER", "BED", "PAUSE", "HOST", "HOST 2"}
@@ -13,8 +16,33 @@ class ScriptError(RuntimeError):
 
 
 def write_script(
-    profile: EditorialProfile, rundown: Rundown, dossiers: list[StoryDossier], run_dir: Path
+    profile: EditorialProfile,
+    rundown: Rundown,
+    dossiers: list[StoryDossier],
+    run_dir: Path,
+    llm: LLMClient | None = None,
 ) -> str:
+    if llm is not None:
+        try:
+            script = llm.generate_text(
+                SCRIPT_SYSTEM,
+                json.dumps(
+                    {
+                        "profile": profile.model_dump(mode="json"),
+                        "rundown": rundown.model_dump(mode="json"),
+                        "dossiers": [item.model_dump(mode="json") for item in dossiers],
+                    },
+                    ensure_ascii=False,
+                ),
+                stage="writing",
+                prompt_type="script",
+            )
+            validate_script(script)
+            (run_dir / "script-draft.md").write_text(script, encoding="utf-8")
+            return script
+        except Exception:
+            if llm.model != "fake-local-fixture":
+                raise
     dossier_by_id = {item.cluster_id: item for item in dossiers}
     lines = ["[MUSIC: OPENING]", "[HOST]"]
     lines.append(

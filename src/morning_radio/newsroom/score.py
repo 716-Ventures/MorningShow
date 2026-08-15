@@ -3,10 +3,41 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from morning_radio.llm.client import LLMClient
+from morning_radio.llm.prompts import SCORING_SYSTEM
+from morning_radio.llm.schemas import StoryScoresResponse
 from morning_radio.models import Cluster, EditorialProfile, StoryScore
 
 
-def score_stories(clusters: list[Cluster], profile: EditorialProfile, run_dir: Path) -> list[StoryScore]:
+def score_stories(
+    clusters: list[Cluster],
+    profile: EditorialProfile,
+    run_dir: Path,
+    llm: LLMClient | None = None,
+) -> list[StoryScore]:
+    if llm is not None:
+        try:
+            response = llm.generate_structured(
+                SCORING_SYSTEM,
+                json.dumps(
+                    {
+                        "profile": profile.model_dump(mode="json"),
+                        "clusters": [item.model_dump(mode="json") for item in clusters],
+                        "required_cluster_ids": [item.cluster_id for item in clusters],
+                    },
+                    ensure_ascii=False,
+                ),
+                StoryScoresResponse,
+                stage="scoring",
+                prompt_type="story_scores",
+            )
+            expected = {item.cluster_id for item in clusters}
+            received = {item.cluster_id for item in response.scores}
+            if expected <= received:
+                return _persist_scores(response.scores, run_dir)
+        except Exception:
+            if llm.model != "fake-local-fixture":
+                raise
     interest_terms = {
         term.lower(): item
         for item in profile.interests
@@ -47,6 +78,11 @@ def score_stories(clusters: list[Cluster], profile: EditorialProfile, run_dir: P
                 final_score=final,
             )
         )
+    scores.sort(key=lambda item: item.final_score, reverse=True)
+    return _persist_scores(scores, run_dir)
+
+
+def _persist_scores(scores: list[StoryScore], run_dir: Path) -> list[StoryScore]:
     scores.sort(key=lambda item: item.final_score, reverse=True)
     (run_dir / "scored-stories.json").write_text(
         json.dumps([item.model_dump(mode="json") for item in scores], indent=2, ensure_ascii=False) + "\n",

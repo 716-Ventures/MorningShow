@@ -40,3 +40,16 @@ Generated episodes and intermediate artifacts are written under `runs/YYYY-MM-DD
 - at least one enabled feed
 
 The POC uses live public feeds by default. Automated tests use fixtures and fake model/audio adapters so orchestration can be verified without internet access or a live local model.
+
+## Offline Fixture Mode
+
+The normal morning command requires live feeds, Ollama, the configured local model, Kokoro, FFmpeg, and FFprobe. For reproducible development tests, the pipeline also supports an explicit fixture mode:
+
+```bash
+MORNING_RADIO_FIXTURE_RUN=1 \
+MORNING_RADIO_FAKE_LLM=1 \
+MORNING_RADIO_FAKE_TTS=1 \
+./show morning --minutes 10 --no-assets
+```
+
+This mode uses a built-in 20-article fixture corpus, deterministic fake model responses, and tone WAV speech. It still uses FFmpeg/FFprobe for the final MP3 when available.

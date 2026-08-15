@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import date
 from pathlib import Path
 
@@ -8,7 +9,8 @@ from morning_radio.artifacts.runs import RunContext, create_run
 from morning_radio.artifacts.sources import write_sources_page
 from morning_radio.audio.master import mix_and_master
 from morning_radio.audio.production import build_production_plan, synthesize_script
-from morning_radio.models import StageStatus
+from morning_radio.llm.client import build_llm_client
+from morning_radio.models import CandidateStory, ExtractionResult, StageStatus
 from morning_radio.newsroom.cluster import cluster_stories
 from morning_radio.newsroom.dossier import build_dossiers
 from morning_radio.newsroom.extract import extract_articles
@@ -36,6 +38,7 @@ def run_morning(requested_date: date, minutes: int | None, no_assets: bool = Fal
     production_settings = load_production_settings(root)
     target_minutes = minutes or profile.show_format.target_minutes
     context = create_run(requested_date, target_minutes, root)
+    llm = build_llm_client(app_settings.llm, context.run_dir)
     try:
         return _run_pipeline(
             context,
@@ -46,6 +49,7 @@ def run_morning(requested_date: date, minutes: int | None, no_assets: bool = Fal
             app_settings,
             feed_settings,
             production_settings,
+            llm,
         )
     except Exception as exc:
         if context.record.status is not StageStatus.FAILED:
@@ -62,14 +66,20 @@ def _run_pipeline(
     app_settings,
     feed_settings,
     production_settings,
+    llm,
 ) -> dict[str, str | int]:
     context.register_artifact("profile_snapshot", _write_profile_snapshot(context.run_dir, profile))
     context.transition(StageStatus.DISCOVERING)
-    candidates = discover_candidates(feed_settings, app_settings, context.run_dir)
+    if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1":
+        candidates, extractions = _fixture_news(context.run_dir)
+    else:
+        candidates = discover_candidates(feed_settings, app_settings, context.run_dir)
+        extractions = []
     context.register_artifact("candidates", context.run_dir / "candidates.jsonl")
 
     context.transition(StageStatus.EXTRACTING)
-    extractions = extract_articles(candidates, app_settings, context.run_dir)
+    if not extractions:
+        extractions = extract_articles(candidates, app_settings, context.run_dir)
     context.register_artifact("extracted", context.run_dir / "extracted")
 
     context.transition(StageStatus.CLUSTERING)
@@ -77,25 +87,25 @@ def _run_pipeline(
     context.register_artifact("clusters", context.run_dir / "clusters.json")
 
     context.transition(StageStatus.SCORING)
-    scores = score_stories(clusters, profile, context.run_dir)
+    scores = score_stories(clusters, profile, context.run_dir, llm)
     selected = select_stories(scores, profile, app_settings, context.run_dir)
     context.register_artifact("scored_stories", context.run_dir / "scored-stories.json")
     context.register_artifact("selected_stories", context.run_dir / "selected-stories.json")
 
     context.transition(StageStatus.RESEARCHING)
-    dossiers = build_dossiers(selected.selected, clusters, extractions, context.run_dir)
+    dossiers = build_dossiers(selected.selected, clusters, extractions, context.run_dir, llm)
     context.register_artifact("dossiers", context.run_dir / "dossiers")
 
     context.transition(StageStatus.PLANNING)
-    rundown = build_rundown(requested_date, target_minutes, profile, dossiers, context.run_dir)
+    rundown = build_rundown(requested_date, target_minutes, profile, dossiers, context.run_dir, llm)
     context.register_artifact("rundown", context.run_dir / "rundown.json")
 
     context.transition(StageStatus.WRITING)
-    script = write_script(profile, rundown, dossiers, context.run_dir)
+    script = write_script(profile, rundown, dossiers, context.run_dir, llm)
     context.register_artifact("script_draft", context.run_dir / "script-draft.md")
 
     context.transition(StageStatus.VERIFYING)
-    verification = verify_script(script, dossiers, context.run_dir)
+    verification = verify_script(script, dossiers, context.run_dir, llm)
     context.register_artifact("verification", context.run_dir / "verification.json")
     if verification.status != "pass":
         raise RuntimeError("Verification failed with high-severity issues.")
@@ -131,3 +141,74 @@ def _write_profile_snapshot(run_dir: Path, profile) -> Path:
     path = run_dir / "profile-snapshot.json"
     path.write_text(profile.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _fixture_news(run_dir: Path) -> tuple[list[CandidateStory], list[ExtractionResult]]:
+    import json
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    topics = [
+        ("ai", "OpenAI releases a new coding agent workflow", "technology"),
+        ("ai", "Anthropic expands enterprise AI controls", "technology"),
+        ("apple", "Apple updates developer tools for macOS", "technology"),
+        ("world", "Major world leaders agree to climate framework", "world"),
+        ("us", "Congress advances major infrastructure package", "us"),
+        ("buffalo", "Buffalo approves waterfront transit funding", "local"),
+        ("bills", "Bills adjust offensive line after injury", "sports"),
+        ("ai", "New open model improves local inference", "technology"),
+        ("apple", "Swift package tooling gets faster resolver", "technology"),
+        ("world", "Central banks signal coordinated inflation response", "world"),
+        ("buffalo", "Western New York prepares for lake-effect storm", "local"),
+        ("noise", "Celebrity couple announces lifestyle brand", "entertainment"),
+        ("ai", "AI startup raises funding for developer testing", "technology"),
+        ("us", "Supreme Court issues significant privacy ruling", "us"),
+        ("world", "Global health agency tracks new outbreak response", "world"),
+        ("bills", "Routine Bills practice notes from training camp", "sports"),
+        ("buffalo", "Local schools adopt new phone policy", "local"),
+        ("apple", "Apple security update patches active exploit", "technology"),
+        ("ai", "Researchers publish safer agent evaluation method", "technology"),
+        ("world", "Major shipping route reopens after disruption", "world"),
+    ]
+    candidates: list[CandidateStory] = []
+    extractions: list[ExtractionResult] = []
+    extracted_dir = run_dir / "extracted"
+    extracted_dir.mkdir(exist_ok=True)
+    for index, (_, title, category) in enumerate(topics, start=1):
+        candidate = CandidateStory(
+            candidate_id=f"fixture-{index:03d}",
+            feed_id=f"fixture-{category}",
+            title=title,
+            url=f"https://example.com/news/{index}",
+            published_at=now,
+            retrieved_at=now,
+            publisher=f"Fixture {category.title()}",
+            feed_summary=title,
+            category_hints=[category],
+            geography_hints=["Buffalo"] if category in {"local", "sports"} else [],
+        )
+        text = (
+            f"{title}. This fixture article provides sourced context for the morning radio "
+            f"pipeline. It explains what changed, why it matters, and what remains uncertain. "
+            * 35
+        )
+        extraction = ExtractionResult(
+            candidate_id=candidate.candidate_id,
+            url=candidate.url,
+            final_url=candidate.url,
+            http_status=200,
+            title=title,
+            published_at=now,
+            text=text,
+            word_count=len(text.split()),
+            extraction_status="usable",
+        )
+        candidates.append(candidate)
+        extractions.append(extraction)
+        (extracted_dir / f"{candidate.candidate_id}.json").write_text(
+            extraction.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+    with (run_dir / "candidates.jsonl").open("w", encoding="utf-8") as handle:
+        for candidate in candidates:
+            handle.write(json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False) + "\n")
+    return candidates, extractions

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from morning_radio.llm.client import LLMClient
+from morning_radio.llm.prompts import DOSSIER_SYSTEM
+from morning_radio.llm.schemas import DossierResponse
 from morning_radio.models import Cluster, DossierFact, ExtractionResult, SelectedStory, StoryDossier
 
 
@@ -11,6 +14,7 @@ def build_dossiers(
     clusters: list[Cluster],
     extractions: list[ExtractionResult],
     run_dir: Path,
+    llm: LLMClient | None = None,
 ) -> list[StoryDossier]:
     cluster_by_id = {item.cluster_id: item for item in clusters}
     extraction_by_id = {item.candidate_id: item for item in extractions}
@@ -25,6 +29,42 @@ def build_dossiers(
             if candidate_id in extraction_by_id
             and extraction_by_id[candidate_id].extraction_status == "usable"
         ]
+        if llm is not None:
+            try:
+                response = llm.generate_structured(
+                    DOSSIER_SYSTEM,
+                    json.dumps(
+                        {
+                            "cluster": cluster.model_dump(mode="json"),
+                            "selected_story": story.model_dump(mode="json"),
+                            "sources": [
+                                {
+                                    "candidate_id": source.candidate_id,
+                                    "url": source.url,
+                                    "title": source.title,
+                                    "text_excerpt": source.text[:5000],
+                                }
+                                for source in sources
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    DossierResponse,
+                    stage="researching",
+                    prompt_type="story_dossier",
+                )
+                if _valid_source_ids(response.dossier, {source.candidate_id for source in sources}):
+                    dossier = response.dossier
+                    (dossier_dir / f"{cluster.cluster_id}.json").write_text(
+                        json.dumps(dossier.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    if dossier.safe_for_scripting:
+                        dossiers.append(dossier)
+                    continue
+            except Exception:
+                if llm.model != "fake-local-fixture":
+                    raise
         facts = [
             DossierFact(
                 claim=_first_sentence(source.text) or cluster.canonical_title,
@@ -57,6 +97,12 @@ def build_dossiers(
     if not dossiers:
         raise RuntimeError("No selected story had enough source support for a dossier.")
     return dossiers
+
+
+def _valid_source_ids(dossier: StoryDossier, known_ids: set[str]) -> bool:
+    if not set(dossier.source_ids) <= known_ids:
+        return False
+    return all(set(fact.supporting_candidate_ids) <= known_ids for fact in dossier.facts)
 
 
 def _first_sentence(text: str) -> str:
