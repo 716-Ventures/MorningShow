@@ -11,6 +11,10 @@ from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
 
 
+class ProductionPlanError(RuntimeError):
+    pass
+
+
 def synthesize_script(
     script: str, production: ProductionSettings, run_dir: Path
 ) -> list[AudioMetadata]:
@@ -38,9 +42,17 @@ def synthesize_script(
     return manifest
 
 
-def build_production_plan(script: str, audio: list[AudioMetadata], run_dir: Path, no_assets: bool) -> list[dict]:
+def build_production_plan(
+    script: str,
+    audio: list[AudioMetadata],
+    run_dir: Path,
+    no_assets: bool,
+    production: ProductionSettings,
+    assets_dir: Path,
+) -> list[dict]:
     plan: list[dict] = []
     audio_index = 0
+    bed_active = False
     for raw_line in script.splitlines():
         line = raw_line.strip()
         if not line:
@@ -48,17 +60,100 @@ def build_production_plan(script: str, audio: list[AudioMetadata], run_dir: Path
         if line.startswith("[PAUSE:"):
             milliseconds = int(re.findall(r"\d+", line)[0])
             plan.append({"type": "pause", "milliseconds": milliseconds})
-        elif line.startswith(("[MUSIC:", "[BUMPER:", "[BED:")):
-            if no_assets:
-                continue
-            plan.append({"type": "asset", "directive": line, "optional": True, "skipped": True})
+        elif line.startswith("[MUSIC:"):
+            asset_name = line.removeprefix("[MUSIC:").removesuffix("]").strip().lower()
+            if asset_name not in {"opening", "closing"}:
+                raise ProductionPlanError(f"Unknown music asset class: {asset_name}")
+            maybe_add_asset(
+                plan,
+                assets_dir / asset_name,
+                "music",
+                line,
+                no_assets,
+                getattr(production.assets, f"{asset_name}_optional"),
+            )
+        elif line.startswith("[BUMPER:"):
+            maybe_add_asset(
+                plan,
+                assets_dir / "bumpers",
+                "bumper",
+                line,
+                no_assets,
+                production.assets.bumpers_optional,
+                line.removeprefix("[BUMPER:").removesuffix("]").strip(),
+            )
+        elif line.startswith("[BED:"):
+            bed_name = line.removeprefix("[BED:").removesuffix("]").strip()
+            if bed_name == "STOP":
+                if not bed_active:
+                    raise ProductionPlanError("BED STOP appeared without an active bed.")
+                bed_active = False
+                plan.append({"type": "bed_stop"})
+            else:
+                if bed_active:
+                    raise ProductionPlanError("Nested beds are not supported.")
+                bed_active = True
+                maybe_add_asset(
+                    plan,
+                    assets_dir / "beds",
+                    "bed_start",
+                    line,
+                    no_assets,
+                    production.assets.beds_optional,
+                    bed_name,
+                )
         elif line in {"[HOST]", "[HOST 2]"} or line.startswith("["):
             continue
         else:
             metadata = audio[audio_index]
             audio_index += 1
-            plan.append({"type": "speech", "path": str(metadata.path), "duration_seconds": metadata.duration_seconds})
+            plan.append(
+                {
+                    "type": "speech",
+                    "path": str(metadata.path),
+                    "duration_seconds": metadata.duration_seconds,
+                }
+            )
+    if bed_active:
+        raise ProductionPlanError("A bed was started but never stopped.")
     (run_dir / "production-plan.json").write_text(
         json.dumps(plan, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     return plan
+
+
+def maybe_add_asset(
+    plan: list[dict],
+    asset_dir: Path,
+    item_type: str,
+    directive: str,
+    no_assets: bool,
+    optional: bool,
+    name: str | None = None,
+) -> None:
+    if no_assets:
+        return
+    path = resolve_asset(asset_dir, name)
+    if path is None:
+        if optional:
+            plan.append({"type": item_type, "directive": directive, "optional": True, "skipped": True})
+            return
+        raise ProductionPlanError(f"Missing required asset for {directive}")
+    plan.append({"type": item_type, "directive": directive, "path": str(path), "optional": optional})
+
+
+def resolve_asset(asset_dir: Path, name: str | None = None) -> Path | None:
+    root = asset_dir.resolve()
+    if name:
+        if "/" in name or "\\" in name or ".." in Path(name).parts:
+            raise ProductionPlanError(f"Invalid asset name: {name}")
+        candidates = list(root.glob(f"{name}.*"))
+    else:
+        candidates = [path for path in root.iterdir() if path.is_file()] if root.exists() else []
+    for candidate in sorted(candidates):
+        resolved = candidate.resolve()
+        if not str(resolved).startswith(str(root)):
+            raise ProductionPlanError(f"Asset escapes configured directory: {candidate}")
+        if resolved.suffix.lower() in {".wav", ".mp3", ".m4a", ".aiff", ".aac"}:
+            return resolved
+    return None

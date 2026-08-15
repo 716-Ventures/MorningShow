@@ -105,7 +105,13 @@ def _run_pipeline(
     context.register_artifact("script_draft", context.run_dir / "script-draft.md")
 
     context.transition(StageStatus.VERIFYING)
-    verification = verify_script(script, dossiers, context.run_dir, llm)
+    verification = verify_script(
+        script,
+        dossiers,
+        context.run_dir,
+        llm,
+        app_settings.verification.maximum_correction_cycles,
+    )
     context.register_artifact("verification", context.run_dir / "verification.json")
     if verification.status != "pass":
         raise RuntimeError("Verification failed with high-severity issues.")
@@ -113,12 +119,24 @@ def _run_pipeline(
 
     context.transition(StageStatus.SYNTHESIZING)
     audio = synthesize_script(script, production_settings, context.run_dir)
-    plan = build_production_plan(script, audio, context.run_dir, no_assets)
+    plan = build_production_plan(
+        script,
+        audio,
+        context.run_dir,
+        no_assets,
+        production_settings,
+        context.root / "assets",
+    )
     context.register_artifact("raw_audio", context.run_dir / "raw-audio")
     context.register_artifact("production_plan", context.run_dir / "production-plan.json")
 
     context.transition(StageStatus.MIXING)
-    episode = mix_and_master(plan, production_settings, context.run_dir)
+    episode = mix_and_master(
+        plan,
+        production_settings,
+        context.run_dir,
+        planned_seconds=None if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1" else rundown.planned_seconds,
+    )
     sources = write_sources_page(rundown, dossiers, clusters, candidates, context.run_dir)
     context.register_artifact("episode", episode)
     context.register_artifact("sources", sources)

@@ -23,7 +23,13 @@ def write_silence(path: Path, milliseconds: int, sample_rate: int = 44100) -> No
         handle.writeframes(b"\x00\x00" * frames)
 
 
-def mix_and_master(plan: list[dict], production: ProductionSettings, run_dir: Path) -> Path:
+def mix_and_master(
+    plan: list[dict],
+    production: ProductionSettings,
+    run_dir: Path,
+    *,
+    planned_seconds: int | None = None,
+) -> Path:
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
@@ -90,6 +96,28 @@ def mix_and_master(plan: list[dict], production: ProductionSettings, run_dir: Pa
     )
     probe_json = json.loads(probe.stdout)
     (run_dir / "mix" / "final-ffprobe.json").write_text(json.dumps(probe_json, indent=2) + "\n")
+    validate_final_mp3(episode, probe_json, planned_seconds)
+    return episode
+
+
+def validate_final_mp3(episode: Path, probe_json: dict, planned_seconds: int | None = None) -> None:
     if not episode.exists() or episode.stat().st_size == 0:
         raise AudioMasterError("Final MP3 was not created.")
-    return episode
+    streams = probe_json.get("streams", [])
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    if not audio_streams:
+        raise AudioMasterError("Final MP3 has no audio stream.")
+    codec = audio_streams[0].get("codec_name")
+    if codec not in {"mp3", "mp3float"}:
+        raise AudioMasterError(f"Final audio codec is not MP3-compatible: {codec}")
+    duration = float(probe_json.get("format", {}).get("duration") or 0)
+    if duration <= 1:
+        raise AudioMasterError("Final MP3 duration is too short to be valid.")
+    if planned_seconds is not None and planned_seconds >= 60:
+        lower = planned_seconds * 0.2
+        upper = planned_seconds * 1.8
+        if not lower <= duration <= upper:
+            raise AudioMasterError(
+                f"Final MP3 duration {duration:.1f}s is outside expected range for "
+                f"{planned_seconds}s planned."
+            )
