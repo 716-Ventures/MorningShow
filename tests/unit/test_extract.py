@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import socket
+from datetime import datetime
 
 import httpx
 import pytest
 import respx
 from httpx import Response
+from pydantic import HttpUrl
 
+from morning_radio.models import CandidateStory, ExtractionResult
+from morning_radio.newsroom import extract as extract_module
 from morning_radio.newsroom.extract import _get_checked_response
 from morning_radio.newsroom.fetch import UnsafeUrlError
+from morning_radio.settings import (
+    AppSettings,
+    LLMSettings,
+    NewsSettings,
+    SelectionSettings,
+    VerificationSettings,
+)
 
 
 def _fake_addrinfo(address: str):
@@ -97,3 +109,89 @@ def test_redirect_limit_is_rejected() -> None:
             UnsafeUrlError, match="Redirect limit"
         ):
             _get_checked_response("http://public.test/0", client)
+
+
+def app_settings(*, concurrency: int = 2) -> AppSettings:
+    return AppSettings(
+        llm=LLMSettings(base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5),
+        news=NewsSettings(
+            request_timeout_seconds=5,
+            max_html_bytes=10240,
+            minimum_article_words=1,
+            minimum_usable_articles=1,
+            candidate_max_age_hours=72,
+            max_candidates=10,
+            max_articles_to_extract=10,
+            concurrency=concurrency,
+        ),
+        selection=SelectionSettings(
+            major_news_importance_threshold=80,
+            dossier_source_preference=2,
+            maximum_selected_stories=3,
+        ),
+        verification=VerificationSettings(maximum_correction_cycles=2),
+    )
+
+
+def candidate(candidate_id: str) -> CandidateStory:
+    return CandidateStory(
+        candidate_id=candidate_id,
+        feed_id="feed",
+        title=candidate_id,
+        url=f"http://public.test/{candidate_id}",
+        retrieved_at=datetime.now().astimezone(),
+    )
+
+
+def test_extract_ranked_articles_respects_concurrency(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+
+    async def fake_extract(candidate_story, settings, client, semaphore):
+        nonlocal active, max_active
+        async with semaphore:
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return ExtractionResult(
+                candidate_id=candidate_story.candidate_id,
+                url=candidate_story.url,
+                extraction_status="usable",
+                text="ok",
+                word_count=1,
+            )
+
+    monkeypatch.setattr(extract_module, "_extract_one_async", fake_extract)
+    asyncio.run(
+        extract_module.extract_ranked_articles(
+            [candidate("a"), candidate("b"), candidate("c")],
+            app_settings(concurrency=2),
+            {},
+        )
+    )
+    assert max_active == 2
+
+
+def test_extract_ranked_articles_preserves_ranked_order(monkeypatch) -> None:
+    async def fake_extract(candidate_story, settings, client, semaphore):
+        async with semaphore:
+            if candidate_story.candidate_id == "a":
+                await asyncio.sleep(0.01)
+            return ExtractionResult(
+                candidate_id=candidate_story.candidate_id,
+                url=candidate_story.url,
+                extraction_status="usable",
+                text="ok",
+                word_count=1,
+            )
+
+    monkeypatch.setattr(extract_module, "_extract_one_async", fake_extract)
+    results = asyncio.run(
+        extract_module.extract_ranked_articles(
+            [candidate("a"), candidate("b")],
+            app_settings(concurrency=2),
+            {},
+        )
+    )
+    assert [item.candidate_id for item in results] == ["a", "b"]
