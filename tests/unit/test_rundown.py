@@ -38,7 +38,7 @@ class CorrectingRundownLLM:
                 rundown=Rundown(
                     show_date=date(2026, 8, 15),
                     target_seconds=600,
-                    planned_seconds=999,
+                    planned_seconds=100,
                     segments=[
                         segment("story-1", "story", ["missing"], 100),
                     ],
@@ -122,7 +122,7 @@ def segment(
 
 
 def test_validate_rundown_reports_unknown_duplicate_and_sum_errors() -> None:
-    rundown = Rundown(
+    rundown = Rundown.model_construct(
         show_date=date(2026, 8, 15),
         target_seconds=600,
         planned_seconds=999,

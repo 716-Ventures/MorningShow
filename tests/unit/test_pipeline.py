@@ -15,6 +15,7 @@ from morning_radio.models import (
     DossierFact,
     ExtractionResult,
     Rundown,
+    RundownSegment,
     StoryDossier,
     VerificationResult,
     VerifiedScript,
@@ -116,7 +117,16 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
         show_date=date(2026, 8, 15),
         target_seconds=600,
         planned_seconds=600,
-        segments=[],
+        segments=[
+            RundownSegment(
+                segment_id="open",
+                type="opening",
+                title="Opening",
+                cluster_ids=[],
+                planned_seconds=600,
+                purpose="test",
+            )
+        ],
     )
     synthesized_scripts: list[str] = []
     planned_scripts: list[str] = []

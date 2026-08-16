@@ -5,7 +5,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+
+class PersistedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class StageStatus(str, Enum):
@@ -41,10 +45,10 @@ LEGAL_TRANSITIONS: dict[StageStatus, set[StageStatus]] = {
 }
 
 
-class RunRecord(BaseModel):
+class RunRecord(PersistedModel):
     run_id: str
     requested_date: date
-    target_minutes: int
+    target_minutes: int = Field(gt=0)
     status: StageStatus
     started_at: datetime
     completed_at: datetime | None = None
@@ -53,12 +57,12 @@ class RunRecord(BaseModel):
     artifact_paths: dict[str, str] = Field(default_factory=dict)
 
 
-class LocationProfile(BaseModel):
+class LocationProfile(PersistedModel):
     home: str
     local_scope: str
 
 
-class Interest(BaseModel):
+class Interest(PersistedModel):
     name: str
     priority: int = Field(ge=1, le=5)
     depth: Literal["major_only", "normal", "deep"]
@@ -75,13 +79,13 @@ class Interest(BaseModel):
         return cleaned
 
 
-class GlobalNewsProfile(BaseModel):
+class GlobalNewsProfile(PersistedModel):
     include_major_us: bool
     include_major_world: bool
     threshold: Literal["major_only", "normal"] = "major_only"
 
 
-class EditorialStyle(BaseModel):
+class EditorialStyle(PersistedModel):
     context_level: Literal["summary", "context", "analysis"]
     assume_subject_familiarity: bool
     ongoing_story_policy: Literal["changes_only", "brief_updates", "always_context"]
@@ -89,7 +93,7 @@ class EditorialStyle(BaseModel):
     avoid_padding: bool = True
 
 
-class ShowFormat(BaseModel):
+class ShowFormat(PersistedModel):
     target_minutes: int = Field(ge=5, le=90)
     minimum_minutes: int = Field(ge=5, le=90)
     maximum_minutes: int = Field(ge=5, le=90)
@@ -106,27 +110,44 @@ class ShowFormat(BaseModel):
             raise ValueError("maximum_minutes must be greater than or equal to minimum_minutes")
         return value
 
+    @model_validator(mode="after")
+    def target_is_inside_bounds(self) -> ShowFormat:
+        if not self.minimum_minutes <= self.target_minutes <= self.maximum_minutes:
+            raise ValueError("target_minutes must be between minimum_minutes and maximum_minutes")
+        if self.allow_variable_length and self.minimum_minutes == self.maximum_minutes:
+            raise ValueError("variable-length shows require different minimum and maximum minutes")
+        return self
 
-class VoicePreferences(BaseModel):
+
+class VoicePreferences(PersistedModel):
     primary_voice: str | None = None
     secondary_voice: str | None = None
     pace: Literal["slow", "normal", "fast"] = "normal"
 
 
-class EditorialProfile(BaseModel):
-    schema_version: int = 1
+class EditorialProfile(PersistedModel):
+    schema_version: Literal[1] = 1
     created_at: datetime
     updated_at: datetime
     location: LocationProfile
-    interests: list[Interest]
+    interests: list[Interest] = Field(min_length=1)
     global_news: GlobalNewsProfile
     negative_preferences: list[str] = Field(default_factory=list)
     editorial_style: EditorialStyle
     show_format: ShowFormat
     voice_preferences: VoicePreferences
 
+    @model_validator(mode="after")
+    def valid_profile_shape(self) -> EditorialProfile:
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at may not be before created_at")
+        names = [interest.name.casefold() for interest in self.interests]
+        if len(names) != len(set(names)):
+            raise ValueError("profile interests must be unique by name")
+        return self
 
-class FeedConfig(BaseModel):
+
+class FeedConfig(PersistedModel):
     id: str
     name: str
     url: HttpUrl
@@ -136,7 +157,7 @@ class FeedConfig(BaseModel):
     priority: int = Field(ge=1, le=5)
 
 
-class CandidateStory(BaseModel):
+class CandidateStory(PersistedModel):
     candidate_id: str
     feed_id: str
     title: str
@@ -149,7 +170,7 @@ class CandidateStory(BaseModel):
     geography_hints: list[str] = Field(default_factory=list)
 
 
-class ExtractionResult(BaseModel):
+class ExtractionResult(PersistedModel):
     candidate_id: str
     url: str
     final_url: str | None = None
@@ -165,24 +186,37 @@ class ExtractionResult(BaseModel):
     failure_reason: str | None = None
 
 
-class Cluster(BaseModel):
+class Cluster(PersistedModel):
     cluster_id: str
     canonical_title: str
-    candidate_ids: list[str]
-    source_count: int
+    candidate_ids: list[str] = Field(min_length=1)
+    source_count: int = Field(gt=0)
     earliest_published_at: datetime | None = None
     latest_published_at: datetime | None = None
     topic_hints: list[str] = Field(default_factory=list)
     fingerprint: str
 
+    @field_validator("candidate_ids")
+    @classmethod
+    def unique_candidate_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("cluster candidate ids must be unique")
+        return value
 
-class ScoreModifier(BaseModel):
+    @model_validator(mode="after")
+    def source_count_matches_candidate_ids(self) -> Cluster:
+        if self.source_count != len(self.candidate_ids):
+            raise ValueError("source_count must equal the number of candidate_ids")
+        return self
+
+
+class ScoreModifier(PersistedModel):
     name: str
     delta: int
     rationale: str
 
 
-class StoryScore(BaseModel):
+class StoryScore(PersistedModel):
     cluster_id: str
     relevance: int = Field(ge=0, le=100)
     importance: int = Field(ge=0, le=100)
@@ -198,20 +232,20 @@ class StoryScore(BaseModel):
     modifiers: list[ScoreModifier] = Field(default_factory=list)
 
 
-class SelectedStory(BaseModel):
+class SelectedStory(PersistedModel):
     cluster_id: str
     reason: str
-    estimated_seconds: int
-    score: int
+    estimated_seconds: int = Field(gt=0)
+    score: int = Field(ge=0, le=100)
     rejection_reason: str | None = None
 
 
-class SelectionResult(BaseModel):
+class SelectionResult(PersistedModel):
     selected: list[SelectedStory]
     not_selected_high_score: list[SelectedStory] = Field(default_factory=list)
 
 
-class DossierFact(BaseModel):
+class DossierFact(PersistedModel):
     claim: str
     supporting_candidate_ids: list[str] = Field(min_length=1)
 
@@ -234,7 +268,7 @@ class DossierFact(BaseModel):
         return cleaned
 
 
-class StoryDossier(BaseModel):
+class StoryDossier(PersistedModel):
     cluster_id: str
     working_headline: str
     what_happened: str
@@ -245,7 +279,7 @@ class StoryDossier(BaseModel):
     uncertainties: list[str] = Field(default_factory=list)
     source_disagreements: list[str] = Field(default_factory=list)
     do_not_claim: list[str] = Field(default_factory=list)
-    recommended_seconds: int
+    recommended_seconds: int = Field(gt=0)
     source_ids: list[str]
     safe_for_scripting: bool = True
 
@@ -288,23 +322,30 @@ class StoryDossier(BaseModel):
         return self
 
 
-class RundownSegment(BaseModel):
+class RundownSegment(PersistedModel):
     segment_id: str
     type: Literal["opening", "headlines", "story", "quick_hits", "local", "sports", "watch_list", "closing"]
     title: str
     cluster_ids: list[str] = Field(default_factory=list)
-    planned_seconds: int
+    planned_seconds: int = Field(gt=0)
     purpose: str
 
 
-class Rundown(BaseModel):
+class Rundown(PersistedModel):
     show_date: date
-    target_seconds: int
-    planned_seconds: int
-    segments: list[RundownSegment]
+    target_seconds: int = Field(gt=0)
+    planned_seconds: int = Field(gt=0)
+    segments: list[RundownSegment] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def planned_seconds_matches_segments(self) -> Rundown:
+        segment_sum = sum(segment.planned_seconds for segment in self.segments)
+        if self.planned_seconds != segment_sum:
+            raise ValueError("planned_seconds must equal the sum of segment planned_seconds")
+        return self
 
 
-class VerificationIssue(BaseModel):
+class VerificationIssue(PersistedModel):
     severity: Literal["low", "medium", "high"]
     category: str
     script_excerpt: str
@@ -313,7 +354,7 @@ class VerificationIssue(BaseModel):
     required_action: str
 
 
-class VerificationResult(BaseModel):
+class VerificationResult(PersistedModel):
     status: Literal["pass", "fail"]
     issues: list[VerificationIssue] = Field(default_factory=list)
     corrected_script_required: bool = False
@@ -329,13 +370,13 @@ class VerificationResult(BaseModel):
         return self
 
 
-class VerifiedScript(BaseModel):
+class VerifiedScript(PersistedModel):
     verification: VerificationResult
     script: str
 
 
-class AudioMetadata(BaseModel):
+class AudioMetadata(PersistedModel):
     voice: str
-    text_hash: str
-    duration_seconds: float
+    text_hash: str = Field(min_length=1)
+    duration_seconds: float = Field(gt=0)
     path: Path

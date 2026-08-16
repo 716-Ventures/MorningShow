@@ -11,6 +11,7 @@ from morning_radio.models import (
     DossierFact,
     ExtractionResult,
     Rundown,
+    RundownSegment,
     StoryDossier,
     VerificationResult,
 )
@@ -227,7 +228,21 @@ def test_invalid_corrected_script_is_rejected(tmp_path: Path) -> None:
 
 def test_verifier_payload_includes_profile_rundown_and_extractions(tmp_path: Path) -> None:
     llm = CapturingLLM()
-    rundown = Rundown(show_date=date(2026, 8, 15), target_seconds=600, planned_seconds=600, segments=[])
+    rundown = Rundown(
+        show_date=date(2026, 8, 15),
+        target_seconds=600,
+        planned_seconds=600,
+        segments=[
+            RundownSegment(
+                segment_id="open",
+                type="opening",
+                title="Opening",
+                cluster_ids=[],
+                planned_seconds=600,
+                purpose="test",
+            )
+        ],
+    )
     extraction = ExtractionResult(
         candidate_id="source-001",
         url="https://example.com/story",
