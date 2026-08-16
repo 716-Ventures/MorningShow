@@ -12,6 +12,7 @@ from morning_radio.models import (
     AudioMetadata,
     CandidateStory,
     Cluster,
+    DossierFact,
     ExtractionResult,
     Rundown,
     StoryDossier,
@@ -107,9 +108,9 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
         what_is_new_today="New.",
         why_it_matters="Matters.",
         background_needed="None.",
-        facts=[],
+        facts=[DossierFact(claim="Fact.", supporting_candidate_ids=["candidate-001"])],
         recommended_seconds=60,
-        source_ids=[],
+        source_ids=["candidate-001"],
     )
     rundown = Rundown(
         show_date=date(2026, 8, 15),

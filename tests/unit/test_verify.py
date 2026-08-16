@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from morning_radio.models import StoryDossier
+from morning_radio.models import DossierFact, StoryDossier
 from morning_radio.showgen.verify import verify_script
 
 
@@ -58,9 +58,9 @@ def test_verification_correction_loop_writes_final(tmp_path: Path) -> None:
         what_is_new_today="New.",
         why_it_matters="Matters.",
         background_needed="None.",
-        facts=[],
+        facts=[DossierFact(claim="Fact.", supporting_candidate_ids=["source-001"])],
         recommended_seconds=60,
-        source_ids=[],
+        source_ids=["source-001"],
     )
     verified = verify_script(
         "[HOST]\nDraft script.\n",

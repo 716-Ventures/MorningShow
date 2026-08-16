@@ -102,7 +102,18 @@ def build_dossiers(
 def _valid_source_ids(dossier: StoryDossier, known_ids: set[str]) -> bool:
     if not set(dossier.source_ids) <= known_ids:
         return False
-    return all(set(fact.supporting_candidate_ids) <= known_ids for fact in dossier.facts)
+    if not all(set(fact.supporting_candidate_ids) <= known_ids for fact in dossier.facts):
+        return False
+    if dossier.safe_for_scripting:
+        if not dossier.facts or not dossier.source_ids:
+            return False
+        fact_ids = {
+            candidate_id
+            for fact in dossier.facts
+            for candidate_id in fact.supporting_candidate_ids
+        }
+        return fact_ids == set(dossier.source_ids)
+    return True
 
 
 def _first_sentence(text: str) -> str:

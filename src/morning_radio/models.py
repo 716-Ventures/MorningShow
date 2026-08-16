@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 class StageStatus(str, Enum):
@@ -204,7 +204,25 @@ class SelectionResult(BaseModel):
 
 class DossierFact(BaseModel):
     claim: str
-    supporting_candidate_ids: list[str]
+    supporting_candidate_ids: list[str] = Field(min_length=1)
+
+    @field_validator("claim")
+    @classmethod
+    def non_empty_claim(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("fact claim may not be empty")
+        return cleaned
+
+    @field_validator("supporting_candidate_ids")
+    @classmethod
+    def unique_non_empty_supporting_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned):
+            raise ValueError("supporting candidate ids may not be empty")
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("supporting candidate ids must be unique")
+        return cleaned
 
 
 class StoryDossier(BaseModel):
@@ -221,6 +239,44 @@ class StoryDossier(BaseModel):
     recommended_seconds: int
     source_ids: list[str]
     safe_for_scripting: bool = True
+
+    @field_validator("source_ids")
+    @classmethod
+    def unique_non_empty_source_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned):
+            raise ValueError("source ids may not be empty")
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("source ids must be unique")
+        return cleaned
+
+    @model_validator(mode="after")
+    def safe_dossier_has_grounded_facts(self) -> StoryDossier:
+        if not self.safe_for_scripting:
+            return self
+        if not self.source_ids:
+            raise ValueError("safe dossiers must include at least one source id")
+        if not self.facts:
+            raise ValueError("safe dossiers must include at least one sourced fact")
+        source_ids = set(self.source_ids)
+        fact_ids = {
+            candidate_id
+            for fact in self.facts
+            for candidate_id in fact.supporting_candidate_ids
+        }
+        unknown_ids = fact_ids - source_ids
+        if unknown_ids:
+            raise ValueError(
+                "fact supporting candidate ids must be present in dossier source ids: "
+                + ", ".join(sorted(unknown_ids))
+            )
+        unused_ids = source_ids - fact_ids
+        if unused_ids:
+            raise ValueError(
+                "safe dossier source ids must support at least one fact: "
+                + ", ".join(sorted(unused_ids))
+            )
+        return self
 
 
 class RundownSegment(BaseModel):

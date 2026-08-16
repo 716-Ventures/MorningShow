@@ -4,7 +4,14 @@ from datetime import date, datetime
 from pathlib import Path
 
 from morning_radio.artifacts.sources import write_sources_page
-from morning_radio.models import CandidateStory, Cluster, Rundown, RundownSegment, StoryDossier
+from morning_radio.models import (
+    CandidateStory,
+    Cluster,
+    DossierFact,
+    Rundown,
+    RundownSegment,
+    StoryDossier,
+)
 
 
 def test_sources_page_escapes_external_text(tmp_path: Path) -> None:
@@ -31,7 +38,7 @@ def test_sources_page_escapes_external_text(tmp_path: Path) -> None:
         what_is_new_today="It is new.",
         why_it_matters="It matters.",
         background_needed="None.",
-        facts=[],
+        facts=[DossierFact(claim="A thing happened.", supporting_candidate_ids=["a"])],
         recommended_seconds=60,
         source_ids=["a"],
     )
