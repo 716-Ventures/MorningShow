@@ -8,7 +8,17 @@ from morning_radio.llm.client import LLMClient
 from morning_radio.llm.prompts import SCRIPT_SYSTEM
 from morning_radio.models import EditorialProfile, Rundown, StoryDossier
 
-ALLOWED_DIRECTIVES = {"MUSIC", "BUMPER", "BED", "PAUSE", "HOST", "HOST 2"}
+DIRECTIVE_PATTERNS = {
+    "host": re.compile(r"^\[(HOST|HOST 2)]$"),
+    "pause": re.compile(r"^\[PAUSE:\s*(\d{2,5})]$"),
+    "music": re.compile(r"^\[MUSIC:\s*(OPENING|CLOSING)]$"),
+    "bumper": re.compile(r"^\[BUMPER:\s*([A-Za-z0-9 _-]{1,80})]$"),
+    "bed": re.compile(r"^\[BED:\s*([A-Za-z0-9 _-]{1,80}|STOP)]$"),
+}
+DEFAULT_WPM = 155
+SCRIPT_DURATION_TOLERANCE = 0.2
+MIN_PAUSE_MS = 100
+MAX_PAUSE_MS = 5000
 
 
 class ScriptError(RuntimeError):
@@ -38,6 +48,7 @@ def write_script(
                 prompt_type="script",
             )
             validate_script(script)
+            script = adjust_script_duration_if_needed(script, rundown, llm)
             (run_dir / "script-draft.md").write_text(script, encoding="utf-8")
             return script
         except Exception:
@@ -83,16 +94,72 @@ def validate_script(script: str) -> None:
         line = raw_line.strip()
         if not line:
             continue
-        if line.startswith("[") and line.endswith("]"):
-            directive = line[1:-1].split(":", 1)[0].strip()
-            if directive not in ALLOWED_DIRECTIVES:
-                raise ScriptError(f"Unsupported production directive: {line}")
+        directive = parse_directive(line)
+        if directive is not None:
             current_host = directive in {"HOST", "HOST 2"}
             continue
         if line.startswith("- ") or re.match(r"^\d+\.", line):
             raise ScriptError("Spoken copy may not contain markdown lists.")
         if not current_host:
             raise ScriptError(f"Spoken paragraph is not under a host marker: {line[:40]}")
+
+
+def parse_directive(line: str) -> str | None:
+    if not line.startswith("["):
+        return None
+    host = DIRECTIVE_PATTERNS["host"].match(line)
+    if host:
+        return host.group(1)
+    pause = DIRECTIVE_PATTERNS["pause"].match(line)
+    if pause:
+        milliseconds = int(pause.group(1))
+        if not MIN_PAUSE_MS <= milliseconds <= MAX_PAUSE_MS:
+            raise ScriptError(f"Pause directive is outside {MIN_PAUSE_MS}-{MAX_PAUSE_MS}ms: {line}")
+        return "PAUSE"
+    for name in ("music", "bumper", "bed"):
+        match = DIRECTIVE_PATTERNS[name].match(line)
+        if match:
+            if len(match.groups()) == 1 and not match.group(1).strip():
+                raise ScriptError(f"Directive argument may not be empty: {line}")
+            return name.upper()
+    if line.endswith("]"):
+        raise ScriptError(f"Unsupported production directive: {line}")
+    raise ScriptError(f"Malformed production directive: {line}")
+
+
+def estimate_spoken_seconds(script: str, wpm: int = DEFAULT_WPM) -> int:
+    word_count = sum(len(re.findall(r"\b[\w']+\b", text)) for _, text in spoken_blocks(script))
+    pause_seconds = 0.0
+    for raw_line in script.splitlines():
+        line = raw_line.strip()
+        pause = DIRECTIVE_PATTERNS["pause"].match(line)
+        if pause:
+            pause_seconds += int(pause.group(1)) / 1000
+    return round((word_count / wpm) * 60 + pause_seconds)
+
+
+def adjust_script_duration_if_needed(script: str, rundown: Rundown, llm: LLMClient) -> str:
+    estimate = estimate_spoken_seconds(script)
+    lower = rundown.planned_seconds * (1 - SCRIPT_DURATION_TOLERANCE)
+    upper = rundown.planned_seconds * (1 + SCRIPT_DURATION_TOLERANCE)
+    if lower <= estimate <= upper:
+        return script
+    adjusted = llm.generate_text(
+        SCRIPT_SYSTEM,
+        json.dumps(
+            {
+                "task": "Adjust script length without adding facts.",
+                "estimated_seconds": estimate,
+                "target_seconds": rundown.planned_seconds,
+                "script": script,
+            },
+            ensure_ascii=False,
+        ),
+        stage="writing",
+        prompt_type="script_duration_adjustment",
+    )
+    validate_script(adjusted)
+    return adjusted
 
 
 def spoken_blocks(script: str) -> list[tuple[str, str]]:
