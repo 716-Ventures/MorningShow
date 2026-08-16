@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 if command -v uv >/dev/null 2>&1; then
-  exec uv run morning-radio "$@"
+  exec uv --project "$SCRIPT_DIR" run morning-radio "$@"
 fi
 
 for uv_path in "$HOME/.local/bin/uv" "$HOME/Library/Python/3.9/bin/uv"; do
   if [ -x "$uv_path" ]; then
-    exec "$uv_path" run morning-radio "$@"
+    exec "$uv_path" --project "$SCRIPT_DIR" run morning-radio "$@"
   fi
 done
 
-PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src" exec python3 -m morning_radio.cli "$@"
+if ! python3 - <<'PY'
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
+PY
+then
+  echo "Python 3.12 or newer is required. Install uv or run with a Python 3.12+ interpreter." >&2
+  exit 1
+fi
+
+PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$SCRIPT_DIR/src" exec python3 -m morning_radio.cli "$@"
