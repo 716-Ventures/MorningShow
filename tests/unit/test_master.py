@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from morning_radio.audio.master import AudioMasterError, coerce_production_plan, validate_final_mp3
+from morning_radio.audio.master import (
+    AudioMasterError,
+    coerce_production_plan,
+    escape_concat_path,
+    metadata_args,
+    run_command,
+    run_probe,
+    validate_final_mp3,
+)
 from morning_radio.settings import ProductionSettings
 
 
@@ -130,3 +138,38 @@ def test_final_mp3_rejects_missing_bitrate(tmp_path: Path) -> None:
             planned_seconds=100,
             production=production_settings(),
         )
+
+
+def test_concat_path_escapes_apostrophes() -> None:
+    assert escape_concat_path(Path("/tmp/host's voice.wav")) == "/tmp/host'\\''s voice.wav"
+
+
+def test_metadata_args_include_episode_fields() -> None:
+    args = metadata_args("Morning Show 2026-08-15", "2026-08-15")
+    pairs = list(zip(args[0::2], args[1::2], strict=True))
+
+    assert all(flag == "-metadata" for flag, _ in pairs)
+    assert ("-metadata", "title=Morning Show 2026-08-15") in pairs
+    assert ("-metadata", "album=Personal Morning Radio") in pairs
+    assert ("-metadata", "show=Personal Morning Radio") in pairs
+    assert ("-metadata", "date=2026-08-15") in pairs
+
+
+def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:
+    with pytest.raises(AudioMasterError, match="see .*fail-stderr.txt"):
+        run_command(
+            ["/bin/sh", "-c", "echo detailed failure >&2; exit 7"],
+            tmp_path,
+            "fail",
+        )
+
+    assert "detailed failure" in (tmp_path / "mix" / "fail-stderr.txt").read_text(encoding="utf-8")
+
+
+def test_run_probe_rejects_invalid_json_with_diagnostics(tmp_path: Path) -> None:
+    episode = episode_file(tmp_path)
+
+    with pytest.raises(AudioMasterError, match="invalid JSON"):
+        run_probe("/bin/echo", episode, tmp_path)
+
+    assert (tmp_path / "mix" / "ffprobe-stderr.txt").exists()

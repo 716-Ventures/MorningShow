@@ -171,6 +171,8 @@ def _run_pipeline(
         production_settings,
         context.run_dir,
         planned_seconds=None if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1" else rundown.planned_seconds,
+        episode_title=f"Personal Morning Radio {requested_date.isoformat()}",
+        episode_date=requested_date.isoformat(),
     )
     sources = write_sources_page(
         rundown,
