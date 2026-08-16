@@ -6,11 +6,18 @@ from pathlib import Path
 from morning_radio.llm.client import LLMClient
 from morning_radio.llm.prompts import DOSSIER_SYSTEM
 from morning_radio.llm.schemas import DossierResponse
-from morning_radio.models import Cluster, DossierFact, ExtractionResult, SelectedStory, StoryDossier
+from morning_radio.models import (
+    Cluster,
+    DossierFact,
+    ExtractionResult,
+    SelectedStory,
+    SelectionResult,
+    StoryDossier,
+)
 
 
 def build_dossiers(
-    selected: list[SelectedStory],
+    selected: SelectionResult | list[SelectedStory],
     clusters: list[Cluster],
     extractions: list[ExtractionResult],
     run_dir: Path,
@@ -19,9 +26,19 @@ def build_dossiers(
     cluster_by_id = {item.cluster_id: item for item in clusters}
     extraction_by_id = {item.candidate_id: item for item in extractions}
     dossiers: list[StoryDossier] = []
+    rejections: list[dict[str, str]] = []
     dossier_dir = run_dir / "dossiers"
     dossier_dir.mkdir(exist_ok=True)
-    for story in selected:
+    primary_stories, backfill_stories = selection_queues(selected)
+    queue = [*primary_stories, *backfill_stories]
+    attempted: set[str] = set()
+    target_count = len(primary_stories)
+    for story in queue:
+        if len(dossiers) >= target_count:
+            break
+        if story.cluster_id in attempted:
+            continue
+        attempted.add(story.cluster_id)
         cluster = cluster_by_id[story.cluster_id]
         sources = [
             extraction_by_id[candidate_id]
@@ -61,6 +78,13 @@ def build_dossiers(
                     )
                     if dossier.safe_for_scripting:
                         dossiers.append(dossier)
+                    else:
+                        rejections.append(
+                            {
+                                "cluster_id": dossier.cluster_id,
+                                "reason": "llm_marked_unsafe",
+                            }
+                        )
                     continue
             except Exception:
                 if llm.model != "fake-local-fixture":
@@ -94,9 +118,31 @@ def build_dossiers(
         )
         if safe:
             dossiers.append(dossier)
+        else:
+            rejections.append({"cluster_id": cluster.cluster_id, "reason": "no_usable_source_facts"})
     if not dossiers:
         raise RuntimeError("No selected story had enough source support for a dossier.")
+    (dossier_dir / "backfill-history.json").write_text(
+        json.dumps(
+            {
+                "target_count": target_count,
+                "attempted_cluster_ids": sorted(attempted),
+                "final_cluster_ids": [item.cluster_id for item in dossiers],
+                "rejections": rejections,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return dossiers
+
+
+def selection_queues(selected: SelectionResult | list[SelectedStory]) -> tuple[list[SelectedStory], list[SelectedStory]]:
+    if isinstance(selected, SelectionResult):
+        return selected.selected, selected.not_selected_high_score
+    return selected, []
 
 
 def _valid_source_ids(dossier: StoryDossier, known_ids: set[str]) -> bool:

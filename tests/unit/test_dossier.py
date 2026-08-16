@@ -3,8 +3,15 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from morning_radio.models import DossierFact, StoryDossier
-from morning_radio.newsroom.dossier import _valid_source_ids
+from morning_radio.models import (
+    Cluster,
+    DossierFact,
+    ExtractionResult,
+    SelectedStory,
+    SelectionResult,
+    StoryDossier,
+)
+from morning_radio.newsroom.dossier import _valid_source_ids, build_dossiers
 
 
 def _dossier_payload(**overrides):
@@ -106,3 +113,56 @@ def test_valid_source_ids_accepts_grounded_safe_dossier() -> None:
         safe_for_scripting=True,
     )
     assert _valid_source_ids(dossier, {"candidate-001"}) is True
+
+
+def test_unsafe_dossier_backfills_from_unused_high_score_story(tmp_path) -> None:
+    clusters = [
+        Cluster(
+            cluster_id="cluster-primary",
+            canonical_title="Primary",
+            candidate_ids=["primary-source"],
+            source_count=1,
+            fingerprint="primary",
+        ),
+        Cluster(
+            cluster_id="cluster-backfill",
+            canonical_title="Backfill",
+            candidate_ids=["backfill-source"],
+            source_count=1,
+            fingerprint="backfill",
+        ),
+    ]
+    extractions = [
+        ExtractionResult(
+            candidate_id="backfill-source",
+            url="https://example.com/backfill",
+            title="Backfill",
+            text="Backfill has a sourced fact. " * 20,
+            word_count=100,
+            extraction_status="usable",
+        )
+    ]
+    selection = SelectionResult(
+        selected=[
+            SelectedStory(
+                cluster_id="cluster-primary",
+                reason="selected",
+                estimated_seconds=60,
+                score=90,
+            )
+        ],
+        not_selected_high_score=[
+            SelectedStory(
+                cluster_id="cluster-backfill",
+                reason="backfill",
+                estimated_seconds=60,
+                score=85,
+                rejection_reason="duration_budget",
+            )
+        ],
+    )
+
+    dossiers = build_dossiers(selection, clusters, extractions, tmp_path)
+
+    assert [item.cluster_id for item in dossiers] == ["cluster-backfill"]
+    assert (tmp_path / "dossiers" / "backfill-history.json").exists()

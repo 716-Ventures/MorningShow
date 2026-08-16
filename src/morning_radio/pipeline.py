@@ -107,7 +107,7 @@ def _run_pipeline(
     context.register_artifact("selected_stories", context.run_dir / "selected-stories.json")
 
     context.transition(StageStatus.RESEARCHING)
-    dossiers = build_dossiers(selected.selected, clusters, extractions, context.run_dir, llm)
+    dossiers = build_dossiers(selected, clusters, extractions, context.run_dir, llm)
     context.register_artifact("dossiers", context.run_dir / "dossiers")
 
     context.transition(StageStatus.PLANNING)
