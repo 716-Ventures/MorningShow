@@ -83,7 +83,7 @@ def _run_pipeline(
     context.register_artifact("extracted", context.run_dir / "extracted")
 
     context.transition(StageStatus.CLUSTERING)
-    clusters = cluster_stories(candidates, extractions, context.run_dir)
+    clusters = cluster_stories(candidates, extractions, context.run_dir, llm)
     context.register_artifact("clusters", context.run_dir / "clusters.json")
 
     context.transition(StageStatus.SCORING)
