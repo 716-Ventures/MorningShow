@@ -13,3 +13,13 @@ def test_rejects_unsafe_schemes() -> None:
 def test_rejects_loopback() -> None:
     with pytest.raises(UnsafeUrlError):
         assert_safe_public_url("http://127.0.0.1:11434")
+
+
+def test_rejects_url_credentials() -> None:
+    with pytest.raises(UnsafeUrlError):
+        assert_safe_public_url("https://user:pass@example.com/story")
+
+
+def test_rejects_malformed_port() -> None:
+    with pytest.raises(UnsafeUrlError):
+        assert_safe_public_url("https://example.com:not-a-port/story")

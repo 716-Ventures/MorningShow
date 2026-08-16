@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 import trafilatura
@@ -14,6 +15,9 @@ from morning_radio.settings import AppSettings
 
 class ExtractionStageError(RuntimeError):
     pass
+
+
+MAX_REDIRECTS = 5
 
 
 def normalize_text(text: str) -> str:
@@ -33,7 +37,7 @@ def extract_articles(
     output_dir.mkdir(exist_ok=True)
     headers = {"User-Agent": "PersonalMorningRadioPOC/0.1 (+local operator)"}
     with httpx.Client(
-        timeout=settings.news.request_timeout_seconds, follow_redirects=True, headers=headers
+        timeout=settings.news.request_timeout_seconds, follow_redirects=False, headers=headers
     ) as client:
         for candidate in ranked:
             result = _extract_one(candidate, settings, client)
@@ -54,41 +58,37 @@ def _extract_one(
     candidate: CandidateStory, settings: AppSettings, client: httpx.Client
 ) -> ExtractionResult:
     try:
-        assert_safe_public_url(candidate.url)
-        with client.stream("GET", candidate.url) as response:
-            final_url = str(response.url)
-            assert_safe_public_url(final_url)
-            content_type = response.headers.get("content-type", "")
-            if "html" not in content_type.lower():
-                return ExtractionResult(
-                    candidate_id=candidate.candidate_id,
-                    url=candidate.url,
-                    final_url=final_url,
-                    http_status=response.status_code,
-                    extraction_status="unsupported_content",
-                    failure_reason=f"content-type={content_type}",
-                )
-            chunks = bytearray()
-            for chunk in response.iter_bytes():
-                chunks.extend(chunk)
-                if len(chunks) > settings.news.max_html_bytes:
-                    return ExtractionResult(
-                        candidate_id=candidate.candidate_id,
-                        url=candidate.url,
-                        final_url=final_url,
-                        http_status=response.status_code,
-                        extraction_status="fetch_failed",
-                        failure_reason="HTML body exceeded configured size limit",
-                    )
-            if response.status_code >= 400:
-                return ExtractionResult(
-                    candidate_id=candidate.candidate_id,
-                    url=candidate.url,
-                    final_url=final_url,
-                    http_status=response.status_code,
-                    extraction_status="fetch_failed",
-                    failure_reason=f"HTTP {response.status_code}",
-                )
+        response = _get_checked_response(candidate.url, client)
+        final_url = str(response.url)
+        content_type = response.headers.get("content-type", "")
+        if "html" not in content_type.lower():
+            return ExtractionResult(
+                candidate_id=candidate.candidate_id,
+                url=candidate.url,
+                final_url=final_url,
+                http_status=response.status_code,
+                extraction_status="unsupported_content",
+                failure_reason=f"content-type={content_type}",
+            )
+        chunks = response.content
+        if len(chunks) > settings.news.max_html_bytes:
+            return ExtractionResult(
+                candidate_id=candidate.candidate_id,
+                url=candidate.url,
+                final_url=final_url,
+                http_status=response.status_code,
+                extraction_status="fetch_failed",
+                failure_reason="HTML body exceeded configured size limit",
+            )
+        if response.status_code >= 400:
+            return ExtractionResult(
+                candidate_id=candidate.candidate_id,
+                url=candidate.url,
+                final_url=final_url,
+                http_status=response.status_code,
+                extraction_status="fetch_failed",
+                failure_reason=f"HTTP {response.status_code}",
+            )
     except (httpx.HTTPError, UnsafeUrlError) as exc:
         return ExtractionResult(
             candidate_id=candidate.candidate_id,
@@ -126,3 +126,23 @@ def _extract_one(
         extraction_status=status,
         failure_reason=reason,
     )
+
+
+def _get_checked_response(url: str, client: httpx.Client) -> httpx.Response:
+    current_url = url
+    visited: set[str] = set()
+    for _ in range(MAX_REDIRECTS + 1):
+        assert_safe_public_url(current_url)
+        if current_url in visited:
+            raise UnsafeUrlError(f"Redirect loop detected: {current_url}")
+        visited.add(current_url)
+        response = client.get(current_url)
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("location")
+        response.close()
+        if not location:
+            raise UnsafeUrlError(f"Redirect response missing Location header: {current_url}")
+        current_url = urljoin(current_url, location)
+        assert_safe_public_url(current_url)
+    raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
