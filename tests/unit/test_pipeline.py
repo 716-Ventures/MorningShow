@@ -169,7 +169,11 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(pipeline, "attach_audio_to_plan", attach_audio)
     monkeypatch.setattr(pipeline, "write_production_plan", lambda *args: None)
     monkeypatch.setattr(pipeline, "mix_and_master", lambda *args, **kwargs: context.run_dir / "episode.mp3")
-    monkeypatch.setattr(pipeline, "write_sources_page", lambda *args: context.run_dir / "sources.html")
+    monkeypatch.setattr(
+        pipeline,
+        "write_sources_page",
+        lambda *args, **kwargs: context.run_dir / "sources.html",
+    )
 
     pipeline._run_pipeline(
         context,

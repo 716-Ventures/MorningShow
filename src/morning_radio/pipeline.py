@@ -172,7 +172,15 @@ def _run_pipeline(
         context.run_dir,
         planned_seconds=None if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1" else rundown.planned_seconds,
     )
-    sources = write_sources_page(rundown, dossiers, clusters, candidates, context.run_dir)
+    sources = write_sources_page(
+        rundown,
+        dossiers,
+        clusters,
+        candidates,
+        context.run_dir,
+        final_script=final_script,
+        run_id=context.record.run_id,
+    )
     context.register_artifact("episode", episode)
     context.register_artifact("sources", sources)
     db.update_story_history(
