@@ -208,9 +208,14 @@ def _run_pipeline(
     )
     context.register_artifact("episode", episode)
     context.register_artifact("sources", sources)
+    dossier_cluster_ids = {dossier.cluster_id for dossier in dossiers}
     db.update_story_history(
         context.root / "data" / "app.db",
-        [(cluster.fingerprint, cluster.canonical_title) for cluster in clusters if cluster.cluster_id in {d.cluster_id for d in dossiers}],
+        [
+            (cluster.fingerprint, cluster.canonical_title)
+            for cluster in clusters
+            if cluster.cluster_id in dossier_cluster_ids
+        ],
         requested_date.isoformat(),
     )
     context.complete()

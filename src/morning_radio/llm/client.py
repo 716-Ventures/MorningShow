@@ -51,6 +51,7 @@ class OllamaClient:
         self.model = settings.model
         self.fixture_fallback = False
         self.run_dir = run_dir
+        self._client = httpx.Client(timeout=settings.timeout_seconds)
 
     def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
         started = time.monotonic()
@@ -61,10 +62,9 @@ class OllamaClient:
                 "prompt": user_prompt,
                 "stream": False,
             }
-            response = httpx.post(
+            response = self._client.post(
                 f"{str(self.settings.base_url).rstrip('/')}/api/generate",
                 json=payload,
-                timeout=self.settings.timeout_seconds,
             )
             response.raise_for_status()
             text = str(response.json().get("response", ""))
@@ -100,10 +100,9 @@ class OllamaClient:
                     "stream": False,
                     "format": "json",
                 }
-                response = httpx.post(
+                response = self._client.post(
                     f"{str(self.settings.base_url).rstrip('/')}/api/generate",
                     json=payload,
-                    timeout=self.settings.timeout_seconds,
                 )
                 response.raise_for_status()
                 raw = response.json().get("response", "")

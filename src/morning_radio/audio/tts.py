@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import wave
+from array import array
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -48,13 +49,18 @@ class ToneTTS:
 
 def _write_tone_wav(path: Path, duration_seconds: float, sample_rate: int = 44100) -> None:
     frames = int(duration_seconds * sample_rate)
+    samples = array(
+        "h",
+        (
+            int(12000 * math.sin(2 * math.pi * 220 * (index / sample_rate)))
+            for index in range(frames)
+        ),
+    )
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(sample_rate)
-        for index in range(frames):
-            value = int(12000 * math.sin(2 * math.pi * 220 * (index / sample_rate)))
-            handle.writeframesraw(value.to_bytes(2, "little", signed=True))
+        handle.writeframes(samples.tobytes())
 
 
 def kokoro_importable() -> bool:
