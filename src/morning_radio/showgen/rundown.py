@@ -4,7 +4,9 @@ import json
 from datetime import date
 from pathlib import Path
 
-from morning_radio.llm.client import LLMClient
+from pydantic import ValidationError
+
+from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import RUNDOWN_SYSTEM
 from morning_radio.llm.schemas import RundownResponse
 from morning_radio.models import EditorialProfile, Rundown, RundownSegment, StoryDossier
@@ -42,8 +44,8 @@ def build_rundown(
                 validation_errors = validate_rundown(candidate, profile, dossiers, target_minutes * 60)
                 if not validation_errors:
                     return _persist_rundown(candidate, run_dir)
-            except Exception:
-                if llm.model != "fake-local-fixture":
+            except (LLMError, ValidationError):
+                if not allows_fixture_fallback(llm):
                     raise
                 break
     segments: list[RundownSegment] = [

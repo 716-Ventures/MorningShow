@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from morning_radio import db
-from morning_radio.llm.client import LLMClient
+from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import StoryScoresResponse
 from morning_radio.models import (
@@ -55,8 +57,8 @@ def score_stories(
                     apply_score_modifiers(response.scores, clusters, profile, history),
                     run_dir,
                 )
-        except Exception:
-            if llm.model != "fake-local-fixture":
+        except (LLMError, ValidationError):
+            if not allows_fixture_fallback(llm):
                 raise
     interest_terms = {
         term.lower(): item

@@ -49,6 +49,7 @@ class OllamaClient:
     def __init__(self, settings: LLMSettings, run_dir: Path):
         self.settings = settings
         self.model = settings.model
+        self.fixture_fallback = False
         self.run_dir = run_dir
 
     def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
@@ -150,6 +151,7 @@ class OllamaClient:
 
 class FakeLLM:
     model = "fake-local-fixture"
+    fixture_fallback = True
 
     def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
         if stage == "writing":
@@ -173,6 +175,10 @@ def build_llm_client(settings: LLMSettings, run_dir: Path) -> LLMClient:
     if os.environ.get("MORNING_RADIO_FAKE_LLM") == "1":
         return FakeLLM()
     return OllamaClient(settings, run_dir)
+
+
+def allows_fixture_fallback(llm: LLMClient) -> bool:
+    return bool(getattr(llm, "fixture_fallback", False))
 
 
 def _fake_payload(stage: str, user_prompt: str) -> dict[str, Any]:

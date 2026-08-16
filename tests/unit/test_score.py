@@ -4,7 +4,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from morning_radio import db
+from morning_radio.llm.client import LLMError
 from morning_radio.models import (
     Cluster,
     EditorialProfile,
@@ -48,6 +51,27 @@ class CapturingScoringLLM:
                 )
             ]
         )
+
+
+class ProgrammingErrorLLM:
+    model = "buggy"
+
+    def generate_text(self, *args, **kwargs) -> str:
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise KeyError("programming bug")
+
+
+class FixtureFallbackLLM:
+    model = "fixture"
+    fixture_fallback = True
+
+    def generate_text(self, *args, **kwargs) -> str:
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise LLMError("fixture model unavailable")
 
 
 def profile(*, negative_preferences: list[str] | None = None) -> EditorialProfile:
@@ -144,3 +168,15 @@ def test_repeat_story_history_reduces_score_and_novelty(tmp_path: Path) -> None:
     assert scores[0].final_score == max(0, scores[0].raw_final_score - 25)
     assert scores[0].novelty == 25
     assert scores[0].modifiers[0].name == "repeat_story"
+
+
+def test_scoring_programming_error_propagates(tmp_path: Path) -> None:
+    with pytest.raises(KeyError, match="programming bug"):
+        score_stories([cluster()], profile(), tmp_path, ProgrammingErrorLLM())
+
+
+def test_scoring_expected_fixture_error_uses_explicit_fallback(tmp_path: Path) -> None:
+    scores = score_stories([cluster()], profile(), tmp_path, FixtureFallbackLLM())
+
+    assert scores
+    assert scores[0].reason.startswith("Matched")

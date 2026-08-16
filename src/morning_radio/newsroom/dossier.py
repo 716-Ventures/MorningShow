@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from morning_radio.llm.client import LLMClient
+from pydantic import ValidationError
+
+from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import DOSSIER_SYSTEM
 from morning_radio.llm.schemas import DossierResponse
 from morning_radio.models import (
@@ -86,8 +88,8 @@ def build_dossiers(
                             }
                         )
                     continue
-            except Exception:
-                if llm.model != "fake-local-fixture":
+            except (LLMError, ValidationError):
+                if not allows_fixture_fallback(llm):
                     raise
         facts = [
             DossierFact(

@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from morning_radio.llm.client import LLMClient
+from pydantic import ValidationError
+
+from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import VERIFY_SYSTEM
 from morning_radio.llm.schemas import VerificationResponse
 from morning_radio.models import (
@@ -158,8 +160,8 @@ def _verify_once(
                 prompt_type="editorial_gate",
             )
             return response.verification, response.corrected_script
-        except Exception:
-            if llm.model != "fake-local-fixture":
+        except (LLMError, ValidationError):
+            if not allows_fixture_fallback(llm):
                 raise
             return VerificationResult(status="pass", issues=[], corrected_script_required=False), None
     return (
