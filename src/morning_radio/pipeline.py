@@ -111,6 +111,9 @@ def _run_pipeline(
         context.run_dir,
         llm,
         app_settings.verification.maximum_correction_cycles,
+        profile=profile,
+        rundown=rundown,
+        extractions=extractions,
     )
     context.register_artifact("verification", context.run_dir / "verification.json")
     if verified.verification.status != "pass":

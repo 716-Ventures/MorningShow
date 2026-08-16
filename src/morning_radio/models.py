@@ -309,6 +309,16 @@ class VerificationResult(BaseModel):
     issues: list[VerificationIssue] = Field(default_factory=list)
     corrected_script_required: bool = False
 
+    @model_validator(mode="after")
+    def pass_requires_no_unresolved_high_issues(self) -> VerificationResult:
+        if self.status == "pass":
+            if self.corrected_script_required:
+                raise ValueError("passing verification cannot require a corrected script")
+            high_issues = [issue for issue in self.issues if issue.severity == "high"]
+            if high_issues:
+                raise ValueError("passing verification cannot contain high-severity issues")
+        return self
+
 
 class VerifiedScript(BaseModel):
     verification: VerificationResult

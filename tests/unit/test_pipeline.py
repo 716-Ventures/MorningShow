@@ -136,7 +136,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(
         pipeline,
         "verify_script",
-        lambda *args: VerifiedScript(
+        lambda *args, **kwargs: VerifiedScript(
             verification=VerificationResult(status="pass"),
             script="[HOST]\nCorrected final text.\n",
         ),

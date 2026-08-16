@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from morning_radio.llm.client import LLMClient
 from morning_radio.llm.prompts import VERIFY_SYSTEM
 from morning_radio.llm.schemas import VerificationResponse
-from morning_radio.models import StoryDossier, VerificationIssue, VerificationResult, VerifiedScript
+from morning_radio.models import (
+    ExtractionResult,
+    Rundown,
+    StoryDossier,
+    VerificationIssue,
+    VerificationResult,
+    VerifiedScript,
+)
 from morning_radio.showgen.script import ScriptError, validate_script
 
 
@@ -16,41 +24,64 @@ def verify_script(
     run_dir: Path,
     llm: LLMClient | None = None,
     maximum_correction_cycles: int = 2,
+    *,
+    profile: Any | None = None,
+    rundown: Rundown | None = None,
+    extractions: list[ExtractionResult] | None = None,
 ) -> VerifiedScript:
     current_script = script
     for cycle in range(maximum_correction_cycles + 1):
-        result, corrected_script = _verify_once(current_script, dossiers, run_dir, llm, cycle)
+        result, corrected_script = _verify_once(
+            current_script,
+            dossiers,
+            run_dir,
+            llm,
+            cycle,
+            profile=profile,
+            rundown=rundown,
+            extractions=extractions,
+        )
         _persist_iteration(result, run_dir, cycle)
+        if corrected_script and corrected_script != current_script:
+            try:
+                validate_script(corrected_script)
+            except ScriptError as exc:
+                result = _script_structure_failure(str(exc))
+                _persist(result, run_dir)
+                return VerifiedScript(verification=result, script=current_script)
+            if cycle < maximum_correction_cycles:
+                current_script = corrected_script
+                (run_dir / f"script-corrected-{cycle + 1}.md").write_text(
+                    current_script, encoding="utf-8"
+                )
+                continue
+            result = VerificationResult(
+                status="fail",
+                issues=[
+                    VerificationIssue(
+                        severity="high",
+                        category="correction_cycle_limit",
+                        script_excerpt="",
+                        explanation="Verifier returned a corrected script after all correction cycles.",
+                        supporting_source_ids=[],
+                        required_action="increase_cycles_or_rewrite",
+                    )
+                ],
+                corrected_script_required=True,
+            )
+            _persist(result, run_dir)
+            return VerifiedScript(verification=result, script=current_script)
         if result.status == "pass":
-            final_script = corrected_script or current_script
+            final_script = current_script
             try:
                 validate_script(final_script)
             except ScriptError as exc:
-                result = VerificationResult(
-                    status="fail",
-                    issues=[
-                        VerificationIssue(
-                            severity="high",
-                            category="script_structure",
-                            script_excerpt="",
-                            explanation=str(exc),
-                            supporting_source_ids=[],
-                            required_action="rewrite",
-                        )
-                    ],
-                    corrected_script_required=True,
-                )
+                result = _script_structure_failure(str(exc))
                 _persist(result, run_dir)
                 return VerifiedScript(verification=result, script=current_script)
             (run_dir / "script-final.md").write_text(final_script, encoding="utf-8")
             _persist(result, run_dir)
             return VerifiedScript(verification=result, script=final_script)
-        if corrected_script and cycle < maximum_correction_cycles:
-            current_script = corrected_script
-            (run_dir / f"script-corrected-{cycle + 1}.md").write_text(
-                current_script, encoding="utf-8"
-            )
-            continue
         _persist(result, run_dir)
         return VerifiedScript(verification=result, script=current_script)
     raise RuntimeError("Verification loop ended unexpectedly.")
@@ -62,6 +93,10 @@ def _verify_once(
     run_dir: Path,
     llm: LLMClient | None,
     cycle: int,
+    *,
+    profile: Any | None,
+    rundown: Rundown | None,
+    extractions: list[ExtractionResult] | None,
 ) -> tuple[VerificationResult, str | None]:
     issues: list[VerificationIssue] = []
     try:
@@ -109,6 +144,11 @@ def _verify_once(
                     {
                         "script": script,
                         "dossiers": [item.model_dump(mode="json") for item in dossiers],
+                        "profile": _dump_optional_model(profile),
+                        "rundown": _dump_optional_model(rundown),
+                        "extractions": [
+                            item.model_dump(mode="json") for item in extractions or []
+                        ],
                         "correction_cycle": cycle,
                     },
                     ensure_ascii=False,
@@ -130,6 +170,31 @@ def _verify_once(
         ),
         None,
     )
+
+
+def _script_structure_failure(explanation: str) -> VerificationResult:
+    return VerificationResult(
+        status="fail",
+        issues=[
+            VerificationIssue(
+                severity="high",
+                category="script_structure",
+                script_excerpt="",
+                explanation=explanation,
+                supporting_source_ids=[],
+                required_action="rewrite",
+            )
+        ],
+        corrected_script_required=True,
+    )
+
+
+def _dump_optional_model(value: Any | None) -> Any | None:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return value
 
 
 def _persist(result: VerificationResult, run_dir: Path) -> None:
