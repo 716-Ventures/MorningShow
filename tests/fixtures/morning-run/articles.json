@@ -1,0 +1,85 @@
+[
+  {
+    "title": "OpenAI releases a new coding agent workflow",
+    "category": "technology"
+  },
+  {
+    "title": "Anthropic expands enterprise AI controls",
+    "category": "technology"
+  },
+  {
+    "title": "Apple updates developer tools for macOS",
+    "category": "technology"
+  },
+  {
+    "title": "Major world leaders agree to climate framework",
+    "category": "world"
+  },
+  {
+    "title": "Congress advances major infrastructure package",
+    "category": "us"
+  },
+  {
+    "title": "Buffalo approves waterfront transit funding",
+    "category": "local"
+  },
+  {
+    "title": "Bills adjust offensive line after injury",
+    "category": "sports"
+  },
+  {
+    "title": "New open model improves local inference",
+    "category": "technology"
+  },
+  {
+    "title": "Swift package tooling gets faster resolver",
+    "category": "technology"
+  },
+  {
+    "title": "Central banks signal coordinated inflation response",
+    "category": "world"
+  },
+  {
+    "title": "Western New York prepares for lake-effect storm",
+    "category": "local"
+  },
+  {
+    "title": "Celebrity couple announces lifestyle brand",
+    "category": "entertainment",
+    "extraction_status": "too_short",
+    "text": "Brief item.",
+    "failure_reason": "Fixture intentionally exercises partial extraction failure handling."
+  },
+  {
+    "title": "AI startup raises funding for developer testing",
+    "category": "technology"
+  },
+  {
+    "title": "Supreme Court issues significant privacy ruling",
+    "category": "us"
+  },
+  {
+    "title": "Global health agency tracks new outbreak response",
+    "category": "world"
+  },
+  {
+    "title": "Routine Bills practice notes from training camp",
+    "category": "sports"
+  },
+  {
+    "title": "Local schools adopt new phone policy",
+    "category": "local"
+  },
+  {
+    "title": "Apple security update patches active exploit",
+    "category": "technology"
+  },
+  {
+    "title": "Researchers publish safer agent evaluation method",
+    "category": "technology"
+  },
+  {
+    "title": "Major shipping route reopens after disruption",
+    "category": "world"
+  }
+]

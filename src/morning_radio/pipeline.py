@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from typing import Literal, cast
 
 from morning_radio import db
 from morning_radio.artifacts.runs import RunContext, create_run
@@ -35,8 +37,13 @@ from morning_radio.showgen.script import write_script
 from morning_radio.showgen.verify import verify_script
 
 
-def run_morning(requested_date: date, minutes: int | None, no_assets: bool = False) -> dict[str, str | int]:
-    root = repo_root()
+def run_morning(
+    requested_date: date,
+    minutes: int | None,
+    no_assets: bool = False,
+    root: Path | None = None,
+) -> dict[str, str | int]:
+    root = root or repo_root()
     db.initialize(root / "data" / "app.db")
     profile = load_profile(root)
     app_settings = load_app_settings(root)
@@ -79,7 +86,7 @@ def _run_pipeline(
     context.register_artifact("profile_snapshot", _write_profile_snapshot(context.run_dir, profile))
     context.transition(StageStatus.DISCOVERING)
     if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1":
-        candidates, extractions = _fixture_news(context.run_dir)
+        candidates, extractions = _fixture_news(context.run_dir, context.root)
     else:
         candidates = discover_candidates(feed_settings, app_settings, context.run_dir)
         extractions = []
@@ -189,65 +196,66 @@ def _write_profile_snapshot(run_dir: Path, profile) -> Path:
     return path
 
 
-def _fixture_news(run_dir: Path) -> tuple[list[CandidateStory], list[ExtractionResult]]:
-    import json
-    from datetime import datetime
-
+def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list[ExtractionResult]]:
     now = datetime.now().astimezone()
-    topics = [
-        ("ai", "OpenAI releases a new coding agent workflow", "technology"),
-        ("ai", "Anthropic expands enterprise AI controls", "technology"),
-        ("apple", "Apple updates developer tools for macOS", "technology"),
-        ("world", "Major world leaders agree to climate framework", "world"),
-        ("us", "Congress advances major infrastructure package", "us"),
-        ("buffalo", "Buffalo approves waterfront transit funding", "local"),
-        ("bills", "Bills adjust offensive line after injury", "sports"),
-        ("ai", "New open model improves local inference", "technology"),
-        ("apple", "Swift package tooling gets faster resolver", "technology"),
-        ("world", "Central banks signal coordinated inflation response", "world"),
-        ("buffalo", "Western New York prepares for lake-effect storm", "local"),
-        ("noise", "Celebrity couple announces lifestyle brand", "entertainment"),
-        ("ai", "AI startup raises funding for developer testing", "technology"),
-        ("us", "Supreme Court issues significant privacy ruling", "us"),
-        ("world", "Global health agency tracks new outbreak response", "world"),
-        ("bills", "Routine Bills practice notes from training camp", "sports"),
-        ("buffalo", "Local schools adopt new phone policy", "local"),
-        ("apple", "Apple security update patches active exploit", "technology"),
-        ("ai", "Researchers publish safer agent evaluation method", "technology"),
-        ("world", "Major shipping route reopens after disruption", "world"),
-    ]
+    fixture_path = _fixture_news_path(root)
+    try:
+        raw_articles = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RuntimeError(f"Fixture news file is unreadable: {fixture_path}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Fixture news file is invalid JSON: {fixture_path}") from exc
+    if not isinstance(raw_articles, list) or not raw_articles:
+        raise RuntimeError(f"Fixture news file must contain a non-empty article list: {fixture_path}")
+
     candidates: list[CandidateStory] = []
     extractions: list[ExtractionResult] = []
     extracted_dir = run_dir / "extracted"
     extracted_dir.mkdir(exist_ok=True)
-    for index, (_, title, category) in enumerate(topics, start=1):
+    for index, raw_article in enumerate(raw_articles, start=1):
+        if not isinstance(raw_article, dict):
+            raise TypeError(f"Fixture article #{index} must be an object.")
+        title = str(raw_article.get("title", "")).strip()
+        category = str(raw_article.get("category", "")).strip()
+        if not title or not category:
+            raise RuntimeError(f"Fixture article #{index} must include title and category.")
+        raw_status = str(raw_article.get("extraction_status", "usable"))
+        if raw_status not in {"usable", "too_short", "fetch_failed", "unsupported_content", "parse_failed"}:
+            raise RuntimeError(f"Fixture article #{index} has invalid extraction_status: {raw_status}")
+        status = cast(
+            Literal["usable", "too_short", "fetch_failed", "unsupported_content", "parse_failed"],
+            raw_status,
+        )
+        article_text = str(raw_article.get("text", "")).strip()
+        if status == "usable" and not article_text:
+            article_text = (
+                f"{title}. This fixture article provides sourced context for the morning radio "
+                f"pipeline. It explains what changed, why it matters, and what remains uncertain. "
+                * 35
+            )
         candidate = CandidateStory(
             candidate_id=f"fixture-{index:03d}",
             feed_id=f"fixture-{category}",
             title=title,
-            url=f"https://example.com/news/{index}",
+            url=str(raw_article.get("url", f"https://example.com/news/{index}")),
             published_at=now,
             retrieved_at=now,
-            publisher=f"Fixture {category.title()}",
+            publisher=str(raw_article.get("publisher", f"Fixture {category.title()}")),
             feed_summary=title,
             category_hints=[category],
             geography_hints=["Buffalo"] if category in {"local", "sports"} else [],
-        )
-        text = (
-            f"{title}. This fixture article provides sourced context for the morning radio "
-            f"pipeline. It explains what changed, why it matters, and what remains uncertain. "
-            * 35
         )
         extraction = ExtractionResult(
             candidate_id=candidate.candidate_id,
             url=candidate.url,
             final_url=candidate.url,
-            http_status=200,
+            http_status=200 if status == "usable" else None,
             title=title,
             published_at=now,
-            text=text,
-            word_count=len(text.split()),
-            extraction_status="usable",
+            text=article_text,
+            word_count=len(article_text.split()),
+            extraction_status=status,
+            failure_reason=None if status == "usable" else str(raw_article.get("failure_reason", status)),
         )
         candidates.append(candidate)
         extractions.append(extraction)
@@ -258,3 +266,9 @@ def _fixture_news(run_dir: Path) -> tuple[list[CandidateStory], list[ExtractionR
         for candidate in candidates:
             handle.write(json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False) + "\n")
     return candidates, extractions
+
+
+def _fixture_news_path(root: Path) -> Path:
+    override = os.environ.get("MORNING_RADIO_FIXTURE_DIR")
+    fixture_dir = Path(override) if override else root / "tests" / "fixtures" / "morning-run"
+    return fixture_dir / "articles.json"

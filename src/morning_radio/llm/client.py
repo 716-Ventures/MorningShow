@@ -176,5 +176,22 @@ def build_llm_client(settings: LLMSettings, run_dir) -> LLMClient:
 
 def _fake_payload(stage: str, user_prompt: str) -> dict[str, Any]:
     if stage == "verification":
+        if os.environ.get("MORNING_RADIO_FAKE_VERIFICATION_FAIL") == "1":
+            return {
+                "verification": {
+                    "status": "fail",
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "category": "fixture",
+                            "script_excerpt": "Good morning.",
+                            "explanation": "Fixture verification failure requested.",
+                            "supporting_source_ids": [],
+                            "required_action": "Stop the run before synthesis.",
+                        }
+                    ],
+                    "corrected_script_required": False,
+                }
+            }
         return {"verification": {"status": "pass", "issues": [], "corrected_script_required": False}}
     return {}
