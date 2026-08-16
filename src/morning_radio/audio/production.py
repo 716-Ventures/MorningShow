@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.audio.tts import TTSAdapter, build_tts_adapter, speech_hash
 from morning_radio.models import AudioMetadata, EditorialProfile
 from morning_radio.settings import ProductionSettings
@@ -104,9 +104,9 @@ def synthesize_script(
         metadata = adapter.synthesize(text, selected_voice, path, speed=production.tts.speed)
         cache[text_hash] = metadata
         manifest.append(metadata)
-    (run_dir / "raw-audio" / "manifest.json").write_text(
-        json.dumps([item.model_dump(mode="json") for item in manifest], indent=2) + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        run_dir / "raw-audio" / "manifest.json",
+        [item.model_dump(mode="json") for item in manifest],
     )
     return manifest
 
@@ -237,14 +237,9 @@ def attach_audio_to_plan(
 
 
 def write_production_plan(plan: list[ProductionItem], run_dir: Path) -> None:
-    (run_dir / "production-plan.json").write_text(
-        json.dumps(
-            PRODUCTION_PLAN_ADAPTER.dump_python(plan, mode="json"),
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        run_dir / "production-plan.json",
+        PRODUCTION_PLAN_ADAPTER.dump_python(plan, mode="json"),
     )
 
 

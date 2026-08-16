@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import SCRIPT_SYSTEM
 from morning_radio.models import EditorialProfile, Rundown, StoryDossier
@@ -49,7 +50,7 @@ def write_script(
             )
             validate_script(script)
             script = adjust_script_duration_if_needed(script, rundown, llm)
-            (run_dir / "script-draft.md").write_text(script, encoding="utf-8")
+            atomic_write_text(run_dir / "script-draft.md", script)
             return script
         except (LLMError, ScriptError):
             if not allows_fixture_fallback(llm):
@@ -84,7 +85,7 @@ def write_script(
     lines.extend(["[HOST]", "That is the show. Have a good morning.", "[MUSIC: CLOSING]"])
     script = "\n\n".join(lines) + "\n"
     validate_script(script)
-    (run_dir / "script-draft.md").write_text(script, encoding="utf-8")
+    atomic_write_text(run_dir / "script-draft.md", script)
     return script
 
 

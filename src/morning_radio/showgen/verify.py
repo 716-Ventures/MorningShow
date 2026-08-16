@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from morning_radio.artifacts.io import atomic_write_json, atomic_write_text
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import VERIFY_SYSTEM
 from morning_radio.llm.schemas import VerificationResponse
@@ -53,9 +54,7 @@ def verify_script(
                 return VerifiedScript(verification=result, script=current_script)
             if cycle < maximum_correction_cycles:
                 current_script = corrected_script
-                (run_dir / f"script-corrected-{cycle + 1}.md").write_text(
-                    current_script, encoding="utf-8"
-                )
+                atomic_write_text(run_dir / f"script-corrected-{cycle + 1}.md", current_script)
                 continue
             result = VerificationResult(
                 status="fail",
@@ -81,7 +80,7 @@ def verify_script(
                 result = _script_structure_failure(str(exc))
                 _persist(result, run_dir)
                 return VerifiedScript(verification=result, script=current_script)
-            (run_dir / "script-final.md").write_text(final_script, encoding="utf-8")
+            atomic_write_text(run_dir / "script-final.md", final_script)
             _persist(result, run_dir)
             return VerifiedScript(verification=result, script=final_script)
         _persist(result, run_dir)
@@ -200,16 +199,9 @@ def _dump_optional_model(value: Any | None) -> Any | None:
 
 
 def _persist(result: VerificationResult, run_dir: Path) -> None:
-    (run_dir / "verification.json").write_text(
-        json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(run_dir / "verification.json", result.model_dump(mode="json"))
 
 
 def _persist_iteration(result: VerificationResult, run_dir: Path, cycle: int) -> None:
     path = run_dir / "logs" / f"verification-{cycle}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(path, result.model_dump(mode="json"))

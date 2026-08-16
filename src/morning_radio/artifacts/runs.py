@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from morning_radio import db
+from morning_radio.artifacts.io import atomic_write_json as write_atomic_json
 from morning_radio.logging import log_line
 from morning_radio.models import LEGAL_TRANSITIONS, RunRecord, StageStatus
 from morning_radio.settings import repo_root
@@ -18,12 +17,7 @@ class RunTransitionError(RuntimeError):
 
 
 def atomic_write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        json.dump(payload, handle, indent=2, default=str)
-        handle.write("\n")
-        tmp_path = Path(handle.name)
-    tmp_path.replace(path)
+    write_atomic_json(path, payload)
 
 
 def generate_run_id(now: datetime | None = None) -> str:

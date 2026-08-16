@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -11,6 +10,7 @@ import feedparser
 import httpx
 from dateutil import parser as date_parser
 
+from morning_radio.artifacts.io import atomic_write_jsonl
 from morning_radio.logging import log_line
 from morning_radio.models import CandidateStory, FeedConfig
 from morning_radio.settings import AppSettings, FeedSettings
@@ -102,10 +102,10 @@ def discover_candidates(
     candidates = fair_cap_candidates(feed_order, per_feed_candidates, app_settings.news.max_candidates)
     if not candidates:
         raise DiscoveryError(f"Zero candidates retrieved from enabled feeds ({failures} feed failures).")
-    output = run_dir / "candidates.jsonl"
-    with output.open("w", encoding="utf-8") as handle:
-        for candidate in candidates:
-            handle.write(json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False) + "\n")
+    atomic_write_jsonl(
+        run_dir / "candidates.jsonl",
+        [candidate.model_dump(mode="json") for candidate in candidates],
+    )
     return candidates
 
 

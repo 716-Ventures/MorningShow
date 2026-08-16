@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import RUNDOWN_SYSTEM
 from morning_radio.llm.schemas import RundownResponse
@@ -186,8 +187,5 @@ def fit_rundown_to_target(rundown: Rundown, profile: EditorialProfile, target_se
 
 
 def _persist_rundown(rundown: Rundown, run_dir: Path) -> Rundown:
-    (run_dir / "rundown.json").write_text(
-        json.dumps(rundown.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(run_dir / "rundown.json", rundown.model_dump(mode="json"))
     return rundown

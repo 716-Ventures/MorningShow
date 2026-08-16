@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import typer
 from pydantic import ValidationError
 from rich.console import Console
 
 from morning_radio import db
+from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback, build_llm_client
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import FeedbackMemoryResponse
@@ -94,11 +94,3 @@ def normalize_memory(markdown: str) -> str:
     if not text.startswith("# Editorial Memory"):
         text = "# Editorial Memory\n\n" + text
     return text + "\n"
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        handle.write(text)
-        tmp_path = Path(handle.name)
-    tmp_path.replace(path)

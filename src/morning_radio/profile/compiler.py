@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.artifacts.runs import atomic_write_json
 from morning_radio.models import EditorialProfile
 from morning_radio.settings import repo_root
@@ -37,13 +38,10 @@ def save_profile(profile: EditorialProfile, root: Path | None = None) -> None:
     base = root or repo_root()
     atomic_write_json(profile_path(base), profile.model_dump(mode="json"))
     summary_path = profile_summary_path(base)
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = summary_path.with_suffix(".tmp")
-    tmp.write_text(render_profile_summary(profile), encoding="utf-8")
-    tmp.replace(summary_path)
+    atomic_write_text(summary_path, render_profile_summary(profile))
     mem = memory_path(base)
     if not mem.exists():
-        mem.write_text("# Editorial Memory\n\nNo durable feedback yet.\n", encoding="utf-8")
+        atomic_write_text(mem, "# Editorial Memory\n\nNo durable feedback yet.\n")
 
 
 def render_profile_summary(profile: EditorialProfile) -> str:

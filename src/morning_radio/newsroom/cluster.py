@@ -6,6 +6,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.llm.client import LLMClient
 from morning_radio.llm.schemas import SameEventDecision
 from morning_radio.models import CandidateStory, Cluster, ExtractionResult
@@ -105,17 +106,9 @@ def cluster_stories(
                 fingerprint=fingerprint,
             )
         )
-    output = run_dir / "clusters.json"
-    output.write_text(
-        json.dumps([item.model_dump(mode="json") for item in clusters], indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(run_dir / "clusters.json", [item.model_dump(mode="json") for item in clusters])
     decisions_path = run_dir / "logs" / "cluster-decisions.json"
-    decisions_path.parent.mkdir(parents=True, exist_ok=True)
-    decisions_path.write_text(
-        json.dumps(decisions, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(decisions_path, decisions)
     return clusters
 
 

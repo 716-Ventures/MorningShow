@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.models import CandidateStory, Cluster, Rundown, StoryDossier
 from morning_radio.showgen.script import spoken_blocks
 
@@ -46,7 +47,7 @@ def write_sources_page(
         parts.append("</ul></section>")
     parts.append("</body></html>")
     path = run_dir / "sources.html"
-    path.write_text("\n".join(parts), encoding="utf-8")
+    atomic_write_text(path, "\n".join(parts))
     return path
 
 

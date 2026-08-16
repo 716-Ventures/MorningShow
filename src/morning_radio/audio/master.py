@@ -8,6 +8,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
+from morning_radio.artifacts.io import atomic_write_json, atomic_write_text
 from morning_radio.audio.production import (
     PRODUCTION_PLAN_ADAPTER,
     BedStartItem,
@@ -99,9 +100,10 @@ def mix_and_master(
             raise AudioMasterError(f"Unsupported production item: {item!r}")
     if not files:
         raise AudioMasterError("Production plan did not render any audio.")
-    with concat_list.open("w", encoding="utf-8") as handle:
-        for path in files:
-            handle.write(f"file '{escape_concat_path(path.resolve())}'\n")
+    atomic_write_text(
+        concat_list,
+        "".join(f"file '{escape_concat_path(path.resolve())}'\n" for path in files),
+    )
     intermediate = run_dir / "mix" / "program.wav"
     episode = run_dir / "episode.mp3"
     run_command(
@@ -140,7 +142,7 @@ def mix_and_master(
         "master",
     )
     probe_json = run_probe(ffprobe, episode, run_dir)
-    (run_dir / "mix" / "final-ffprobe.json").write_text(json.dumps(probe_json, indent=2) + "\n")
+    atomic_write_json(run_dir / "mix" / "final-ffprobe.json", probe_json)
     validate_final_mp3(episode, probe_json, planned_seconds, production)
     return episode
 
@@ -243,9 +245,9 @@ def run_command(command: list[str], run_dir: Path, label: str) -> None:
             text=True,
         )
     except OSError as exc:
-        stderr_path.write_text(str(exc), encoding="utf-8")
+        atomic_write_text(stderr_path, str(exc))
         raise AudioMasterError(f"FFmpeg command could not start for {label}; see {stderr_path}: {exc}") from exc
-    stderr_path.write_text(result.stderr or "", encoding="utf-8")
+    atomic_write_text(stderr_path, result.stderr or "")
     if result.returncode != 0:
         tail = (result.stderr or "").strip().splitlines()[-8:]
         raise AudioMasterError(
@@ -269,9 +271,9 @@ def run_probe(ffprobe: str, episode: Path, run_dir: Path) -> dict[str, Any]:
             text=True,
         )
     except OSError as exc:
-        stderr_path.write_text(str(exc), encoding="utf-8")
+        atomic_write_text(stderr_path, str(exc))
         raise AudioMasterError(f"FFprobe could not start; see {stderr_path}: {exc}") from exc
-    stderr_path.write_text(probe.stderr or "", encoding="utf-8")
+    atomic_write_text(stderr_path, probe.stderr or "")
     if probe.returncode != 0:
         tail = (probe.stderr or "").strip().splitlines()[-8:]
         raise AudioMasterError(

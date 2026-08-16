@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from morning_radio import db
+from morning_radio.artifacts.io import atomic_write_json, atomic_write_jsonl, atomic_write_text
 from morning_radio.artifacts.runs import RunContext, create_run
 from morning_radio.artifacts.sources import write_sources_page
 from morning_radio.audio.master import mix_and_master
@@ -224,7 +225,7 @@ def _run_pipeline(
 
 def _write_profile_snapshot(run_dir: Path, profile: EditorialProfile) -> Path:
     path = run_dir / "profile-snapshot.json"
-    path.write_text(profile.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, profile.model_dump_json(indent=2) + "\n")
     return path
 
 
@@ -307,12 +308,14 @@ def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list
         )
         candidates.append(candidate)
         extractions.append(extraction)
-        (extracted_dir / f"{candidate.candidate_id}.json").write_text(
-            extraction.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        atomic_write_json(
+            extracted_dir / f"{candidate.candidate_id}.json",
+            extraction.model_dump(mode="json"),
         )
-    with (run_dir / "candidates.jsonl").open("w", encoding="utf-8") as handle:
-        for candidate in candidates:
-            handle.write(json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False) + "\n")
+    atomic_write_jsonl(
+        run_dir / "candidates.jsonl",
+        [candidate.model_dump(mode="json") for candidate in candidates],
+    )
     return candidates, extractions
 
 

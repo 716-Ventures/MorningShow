@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from morning_radio import db
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import StoryScoresResponse
@@ -200,8 +201,8 @@ def apply_score_modifiers(
 
 def _persist_scores(scores: list[StoryScore], run_dir: Path) -> list[StoryScore]:
     scores.sort(key=lambda item: item.final_score, reverse=True)
-    (run_dir / "scored-stories.json").write_text(
-        json.dumps([item.model_dump(mode="json") for item in scores], indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        run_dir / "scored-stories.json",
+        [item.model_dump(mode="json") for item in scores],
     )
     return scores

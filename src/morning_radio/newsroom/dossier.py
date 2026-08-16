@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import DOSSIER_SYSTEM
 from morning_radio.llm.schemas import DossierResponse
@@ -74,9 +75,9 @@ def build_dossiers(
                 )
                 if _valid_source_ids(response.dossier, {source.candidate_id for source in sources}):
                     dossier = response.dossier
-                    (dossier_dir / f"{cluster.cluster_id}.json").write_text(
-                        json.dumps(dossier.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
+                    atomic_write_json(
+                        dossier_dir / f"{cluster.cluster_id}.json",
+                        dossier.model_dump(mode="json"),
                     )
                     if dossier.safe_for_scripting:
                         dossiers.append(dossier)
@@ -114,29 +115,21 @@ def build_dossiers(
             source_ids=[source.candidate_id for source in sources],
             safe_for_scripting=safe,
         )
-        (dossier_dir / f"{cluster.cluster_id}.json").write_text(
-            json.dumps(dossier.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_json(dossier_dir / f"{cluster.cluster_id}.json", dossier.model_dump(mode="json"))
         if safe:
             dossiers.append(dossier)
         else:
             rejections.append({"cluster_id": cluster.cluster_id, "reason": "no_usable_source_facts"})
     if not dossiers:
         raise RuntimeError("No selected story had enough source support for a dossier.")
-    (dossier_dir / "backfill-history.json").write_text(
-        json.dumps(
-            {
-                "target_count": target_count,
-                "attempted_cluster_ids": sorted(attempted),
-                "final_cluster_ids": [item.cluster_id for item in dossiers],
-                "rejections": rejections,
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        dossier_dir / "backfill-history.json",
+        {
+            "target_count": target_count,
+            "attempted_cluster_ids": sorted(attempted),
+            "final_cluster_ids": [item.cluster_id for item in dossiers],
+            "rejections": rejections,
+        },
     )
     return dossiers
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from pathlib import Path
 from urllib.parse import urljoin
@@ -9,6 +8,7 @@ from urllib.parse import urljoin
 import httpx
 import trafilatura
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.models import CandidateStory, ExtractionResult
 from morning_radio.newsroom.fetch import UnsafeUrlError, assert_safe_public_url
 from morning_radio.settings import AppSettings
@@ -39,10 +39,7 @@ def extract_articles(
     headers = {"User-Agent": "PersonalMorningRadioPOC/0.1 (+local operator)"}
     results = asyncio.run(extract_ranked_articles(ranked, settings, headers))
     for result in results:
-        (output_dir / f"{result.candidate_id}.json").write_text(
-            json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_json(output_dir / f"{result.candidate_id}.json", result.model_dump(mode="json"))
     usable = [item for item in results if item.extraction_status == "usable"]
     if len(usable) < settings.news.minimum_usable_articles:
         raise ExtractionStageError(

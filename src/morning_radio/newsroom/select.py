@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.models import EditorialProfile, SelectedStory, SelectionResult, StoryScore
 from morning_radio.settings import AppSettings
 
@@ -67,8 +67,5 @@ def select_stories(
     if not selected:
         raise RuntimeError("No stories survived selection.")
     result = SelectionResult(selected=selected, not_selected_high_score=rejected)
-    (run_dir / "selected-stories.json").write_text(
-        json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(run_dir / "selected-stories.json", result.model_dump(mode="json"))
     return result
