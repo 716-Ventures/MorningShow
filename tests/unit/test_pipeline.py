@@ -124,7 +124,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(pipeline, "discover_candidates", lambda *args: [candidate])
     monkeypatch.setattr(pipeline, "extract_articles", lambda *args: [extraction])
     monkeypatch.setattr(pipeline, "cluster_stories", lambda *args: [cluster])
-    monkeypatch.setattr(pipeline, "score_stories", lambda *args: [])
+    monkeypatch.setattr(pipeline, "score_stories", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         pipeline,
         "select_stories",

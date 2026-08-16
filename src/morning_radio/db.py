@@ -135,3 +135,20 @@ def update_story_history(
                 """,
                 (fingerprint, title, included_date, included_date, included_date),
             )
+
+
+def read_story_history(db_path: Path, fingerprints: list[str]) -> dict[str, sqlite3.Row]:
+    if not fingerprints:
+        return {}
+    placeholders = ",".join("?" for _ in fingerprints)
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT cluster_fingerprint, canonical_title, first_seen_date, last_seen_date,
+                   last_included_date, include_count
+            FROM story_history
+            WHERE cluster_fingerprint IN ({placeholders})
+            """,
+            fingerprints,
+        ).fetchall()
+    return {str(row["cluster_fingerprint"]): row for row in rows}

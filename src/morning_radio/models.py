@@ -176,6 +176,12 @@ class Cluster(BaseModel):
     fingerprint: str
 
 
+class ScoreModifier(BaseModel):
+    name: str
+    delta: int
+    rationale: str
+
+
 class StoryScore(BaseModel):
     cluster_id: str
     relevance: int = Field(ge=0, le=100)
@@ -188,6 +194,8 @@ class StoryScore(BaseModel):
     negative_matches: list[str] = Field(default_factory=list)
     reason: str
     final_score: int = Field(ge=0, le=100)
+    raw_final_score: int | None = None
+    modifiers: list[ScoreModifier] = Field(default_factory=list)
 
 
 class SelectedStory(BaseModel):

@@ -87,7 +87,15 @@ def _run_pipeline(
     context.register_artifact("clusters", context.run_dir / "clusters.json")
 
     context.transition(StageStatus.SCORING)
-    scores = score_stories(clusters, profile, context.run_dir, llm)
+    scores = score_stories(
+        clusters,
+        profile,
+        context.run_dir,
+        llm,
+        extractions=extractions,
+        editorial_memory_path=context.root / "data" / "editorial-memory.md",
+        db_path=context.root / "data" / "app.db",
+    )
     selected = select_stories(scores, profile, app_settings, context.run_dir)
     context.register_artifact("scored_stories", context.run_dir / "scored-stories.json")
     context.register_artifact("selected_stories", context.run_dir / "selected-stories.json")
