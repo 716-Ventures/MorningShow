@@ -20,6 +20,7 @@ morning-radio = "morning_radio.cli:app"
 
 [dependency-groups]
 dev = [
+  "pyright>=1.1.411",
   "pytest>=8.3.0",
   "respx>=0.21.1",
   "ruff>=0.5.5",
@@ -39,3 +40,18 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [
+  "**/__pycache__",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".venv",
+]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+pythonPlatform = "Darwin"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false

@@ -15,4 +15,6 @@ def test_fixture_morning_run_completes(monkeypatch) -> None:
     monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
     result = run_morning(date(2026, 8, 14), minutes=10, no_assets=True)
     assert str(result["episode"]).endswith("episode.mp3")
-    assert result["stories"] > 0
+    stories = result["stories"]
+    assert isinstance(stories, int)
+    assert stories > 0

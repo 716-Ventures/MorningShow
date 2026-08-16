@@ -4,7 +4,7 @@ from pathlib import Path
 
 import respx
 from httpx import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 
 from morning_radio.llm.client import OllamaClient
 from morning_radio.settings import LLMSettings
@@ -16,7 +16,7 @@ class TinyResponse(BaseModel):
 
 def test_structured_generation_retries_after_invalid_json(tmp_path: Path) -> None:
     settings = LLMSettings(
-        base_url="http://ollama.test",
+        base_url=HttpUrl("http://ollama.test"),
         model="fixture-model",
         timeout_seconds=30,
     )
@@ -43,7 +43,7 @@ def test_structured_generation_retries_after_invalid_json(tmp_path: Path) -> Non
 
 def test_text_generation_logs_success(tmp_path: Path) -> None:
     settings = LLMSettings(
-        base_url="http://ollama.test",
+        base_url=HttpUrl("http://ollama.test"),
         model="fixture-model",
         timeout_seconds=30,
     )
