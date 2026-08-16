@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import math
 import os
 import shutil
 import wave
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from morning_radio.models import AudioMetadata
 
@@ -16,6 +18,8 @@ class TTSError(RuntimeError):
 
 
 class TTSAdapter(Protocol):
+    engine_version: str
+
     def available_voices(self) -> list[str]:
         ...
 
@@ -26,6 +30,8 @@ class TTSAdapter(Protocol):
 class ToneTTS:
     """Deterministic local fallback used when Kokoro is unavailable."""
 
+    engine_version = "tone-v1"
+
     def available_voices(self) -> list[str]:
         return ["tone"]
 
@@ -33,7 +39,7 @@ class ToneTTS:
         if voice not in self.available_voices():
             raise TTSError(f"Voice unavailable: {voice}")
         normalized = " ".join(text.split())
-        text_hash = hashlib.sha256(f"{voice}:{speed}:{normalized}".encode()).hexdigest()
+        text_hash = speech_hash("tone", self.engine_version, voice, speed, normalized)
         duration = max(1.0, min(18.0, len(normalized.split()) / (2.4 * speed)))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         _write_tone_wav(output_path, duration)
@@ -59,13 +65,31 @@ def kokoro_importable() -> bool:
     return True
 
 
+AudioWriter = Callable[[Path, list[Any], int], float]
+PipelineFactory = Callable[..., Any]
+
+
 class KokoroTTS:
-    def __init__(self):
+    def __init__(
+        self,
+        pipeline_factory: PipelineFactory | None = None,
+        audio_writer: AudioWriter | None = None,
+    ):
+        if pipeline_factory is None:
+            try:
+                from kokoro import KPipeline  # type: ignore
+            except ImportError as exc:
+                raise TTSError("Kokoro is not importable. Install the local Kokoro TTS backend.") from exc
+            pipeline_factory = KPipeline
+        if pipeline_factory is None:
+            raise TTSError("Kokoro pipeline factory is unavailable.")
+        self._pipeline_factory: PipelineFactory = pipeline_factory
+        self._audio_writer = audio_writer or write_kokoro_audio
+        self._pipelines: dict[str, Any] = {}
         try:
-            from kokoro import KPipeline  # type: ignore
-        except ImportError as exc:
-            raise TTSError("Kokoro is not importable. Install the local Kokoro TTS backend.") from exc
-        self._pipeline_factory = KPipeline
+            self.engine_version = importlib.metadata.version("kokoro")
+        except importlib.metadata.PackageNotFoundError:
+            self.engine_version = "kokoro-unknown"
 
     def available_voices(self) -> list[str]:
         return [
@@ -79,27 +103,42 @@ class KokoroTTS:
         ]
 
     def synthesize(self, text: str, voice: str, output_path: Path, *, speed: float = 1.0) -> AudioMetadata:
-        try:
-            import soundfile as sf  # type: ignore
-        except ImportError as exc:
-            raise TTSError("Kokoro synthesis requires the soundfile package.") from exc
         if voice not in self.available_voices():
             raise TTSError(f"Voice unavailable: {voice}")
         normalized = " ".join(text.split())
-        text_hash = hashlib.sha256(f"{voice}:{speed}:{normalized}".encode()).hexdigest()
+        text_hash = speech_hash("kokoro", self.engine_version, voice, speed, normalized)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        pipeline = self._pipeline_factory(lang_code="a")
+        pipeline = self._pipeline_for("a")
         chunks = []
         for _, _, audio in pipeline(normalized, voice=voice, speed=speed):
             chunks.append(audio)
         if not chunks:
             raise TTSError("Kokoro returned no audio.")
-        import numpy as np  # type: ignore
-
-        waveform = np.concatenate(chunks)
-        sf.write(output_path, waveform, 24000)
-        duration = len(waveform) / 24000
+        duration = self._audio_writer(output_path, chunks, 24000)
         return AudioMetadata(voice=voice, text_hash=text_hash, duration_seconds=duration, path=output_path)
+
+    def _pipeline_for(self, lang_code: str) -> Any:
+        if lang_code not in self._pipelines:
+            self._pipelines[lang_code] = self._pipeline_factory(lang_code=lang_code)
+        return self._pipelines[lang_code]
+
+
+def write_kokoro_audio(output_path: Path, chunks: list[Any], sample_rate: int) -> float:
+    try:
+        import soundfile as sf  # type: ignore
+    except ImportError as exc:
+        raise TTSError("Kokoro synthesis requires the soundfile package.") from exc
+    import numpy as np  # type: ignore
+
+    waveform = np.concatenate(chunks)
+    sf.write(output_path, waveform, sample_rate)
+    return len(waveform) / sample_rate
+
+
+def speech_hash(engine: str, engine_version: str, voice: str, speed: float, normalized_text: str) -> str:
+    return hashlib.sha256(
+        f"{engine}:{engine_version}:{voice}:{speed}:{normalized_text}".encode()
+    ).hexdigest()
 
 
 def build_tts_adapter(engine: str) -> TTSAdapter:

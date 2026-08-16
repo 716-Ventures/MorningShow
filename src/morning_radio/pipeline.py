@@ -160,7 +160,7 @@ def _run_pipeline(
     context.register_artifact("production_plan", context.run_dir / "production-plan.json")
 
     context.transition(StageStatus.SYNTHESIZING)
-    audio = synthesize_script(final_script, production_settings, context.run_dir)
+    audio = synthesize_script(final_script, production_settings, context.run_dir, profile=profile)
     plan = attach_audio_to_plan(plan, audio)
     write_production_plan(plan, context.run_dir)
     context.register_artifact("raw_audio", context.run_dir / "raw-audio")

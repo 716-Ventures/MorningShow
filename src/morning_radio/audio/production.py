@@ -8,8 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from morning_radio.audio.tts import build_tts_adapter
-from morning_radio.models import AudioMetadata
+from morning_radio.audio.tts import TTSAdapter, build_tts_adapter, speech_hash
+from morning_radio.models import AudioMetadata, EditorialProfile
 from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
 
@@ -68,13 +68,17 @@ PRODUCTION_PLAN_ADAPTER = TypeAdapter(list[ProductionItem])
 
 
 def synthesize_script(
-    script: str, production: ProductionSettings, run_dir: Path
+    script: str,
+    production: ProductionSettings,
+    run_dir: Path,
+    profile: EditorialProfile | None = None,
+    adapter: TTSAdapter | None = None,
 ) -> list[AudioMetadata]:
-    voice = production.tts.voice or "tone"
-    secondary = production.tts.secondary_voice or voice
-    adapter = build_tts_adapter(production.tts.engine)
+    voice, secondary = resolve_voices(production, profile)
+    adapter = adapter or build_tts_adapter(production.tts.engine)
     available = set(adapter.available_voices())
     manifest: list[AudioMetadata] = []
+    cache: dict[str, AudioMetadata] = {}
     for index, (host, text) in enumerate(spoken_blocks(script), start=1):
         selected_voice = secondary if host == "HOST 2" else voice
         if (
@@ -85,13 +89,40 @@ def synthesize_script(
             selected_voice = "af_heart"
         if selected_voice not in available:
             raise RuntimeError(f"Configured voice '{selected_voice}' is unavailable.")
+        normalized = " ".join(text.split())
+        text_hash = speech_hash(
+            production.tts.engine,
+            adapter.engine_version,
+            selected_voice,
+            production.tts.speed,
+            normalized,
+        )
+        if text_hash in cache:
+            manifest.append(cache[text_hash])
+            continue
         path = run_dir / "raw-audio" / f"{index:03d}-{host.lower().replace(' ', '-')}.wav"
-        manifest.append(adapter.synthesize(text, selected_voice, path, speed=production.tts.speed))
+        metadata = adapter.synthesize(text, selected_voice, path, speed=production.tts.speed)
+        cache[text_hash] = metadata
+        manifest.append(metadata)
     (run_dir / "raw-audio" / "manifest.json").write_text(
         json.dumps([item.model_dump(mode="json") for item in manifest], indent=2) + "\n",
         encoding="utf-8",
     )
     return manifest
+
+
+def resolve_voices(
+    production: ProductionSettings, profile: EditorialProfile | None = None
+) -> tuple[str, str]:
+    primary = production.tts.voice or profile_voice(profile, "primary_voice") or "tone"
+    secondary = production.tts.secondary_voice or profile_voice(profile, "secondary_voice") or primary
+    return primary, secondary
+
+
+def profile_voice(profile: EditorialProfile | None, field_name: Literal["primary_voice", "secondary_voice"]) -> str | None:
+    if profile is None:
+        return None
+    return getattr(profile.voice_preferences, field_name)
 
 
 def build_production_plan(

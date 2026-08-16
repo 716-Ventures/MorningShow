@@ -19,6 +19,8 @@ The intended runtime is macOS on Apple Silicon with Python 3.12, `uv`, Ollama, l
 
 ```bash
 uv sync
+# Include the local Kokoro TTS stack used by the default production config:
+uv sync --extra tts
 ./show doctor
 ./show configure
 ./show morning --minutes 10 --no-assets
@@ -52,4 +54,4 @@ MORNING_RADIO_FAKE_TTS=1 \
 ./show morning --minutes 10 --no-assets
 ```
 
-This mode uses a built-in 20-article fixture corpus, deterministic fake model responses, and tone WAV speech. It still uses FFmpeg/FFprobe for the final MP3 when available.
+This mode uses the offline fixture corpus under `tests/fixtures/morning-run/`, deterministic fake model responses, and tone WAV speech. It still uses FFmpeg/FFprobe for the final MP3 when available.

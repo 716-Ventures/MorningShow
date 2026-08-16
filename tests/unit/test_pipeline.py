@@ -143,7 +143,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
         ),
     )
 
-    def synthesize(script: str, *args) -> list[AudioMetadata]:
+    def synthesize(script: str, *args, **kwargs) -> list[AudioMetadata]:
         order.append("synthesize")
         synthesized_scripts.append(script)
         return [
