@@ -19,29 +19,33 @@ def build_rundown(
     llm: LLMClient | None = None,
 ) -> Rundown:
     if llm is not None:
-        try:
-            response = llm.generate_structured(
-                RUNDOWN_SYSTEM,
-                json.dumps(
-                    {
-                        "show_date": show_date.isoformat(),
-                        "target_minutes": target_minutes,
-                        "profile": profile.model_dump(mode="json"),
-                        "dossiers": [item.model_dump(mode="json") for item in dossiers],
-                    },
-                    ensure_ascii=False,
-                ),
-                RundownResponse,
-                stage="planning",
-                prompt_type="rundown",
-            )
-            known = {item.cluster_id for item in dossiers}
-            referenced = {cid for segment in response.rundown.segments for cid in segment.cluster_ids}
-            if referenced <= known:
-                return _persist_rundown(response.rundown, run_dir)
-        except Exception:
-            if llm.model != "fake-local-fixture":
-                raise
+        validation_errors: list[str] = []
+        for attempt in range(2):
+            try:
+                response = llm.generate_structured(
+                    RUNDOWN_SYSTEM,
+                    json.dumps(
+                        {
+                            "show_date": show_date.isoformat(),
+                            "target_minutes": target_minutes,
+                            "profile": profile.model_dump(mode="json"),
+                            "dossiers": [item.model_dump(mode="json") for item in dossiers],
+                            "validation_errors": validation_errors,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    RundownResponse,
+                    stage="planning",
+                    prompt_type="rundown",
+                )
+                candidate = recalculate_planned_seconds(response.rundown)
+                validation_errors = validate_rundown(candidate, profile, dossiers, target_minutes * 60)
+                if not validation_errors:
+                    return _persist_rundown(candidate, run_dir)
+            except Exception:
+                if llm.model != "fake-local-fixture":
+                    raise
+                break
     segments: list[RundownSegment] = [
         RundownSegment(
             segment_id="open",
@@ -102,7 +106,81 @@ def build_rundown(
         planned_seconds=planned,
         segments=segments,
     )
+    rundown = fit_rundown_to_target(rundown, profile, target_minutes * 60)
     return _persist_rundown(rundown, run_dir)
+
+
+def validate_rundown(
+    rundown: Rundown,
+    profile: EditorialProfile,
+    dossiers: list[StoryDossier],
+    target_seconds: int,
+) -> list[str]:
+    errors: list[str] = []
+    known = {item.cluster_id for item in dossiers}
+    story_references: list[str] = []
+    for segment in rundown.segments:
+        unknown = sorted(set(segment.cluster_ids) - known)
+        if unknown:
+            errors.append(f"segment {segment.segment_id} references unknown cluster ids: {unknown}")
+        if segment.type == "story":
+            if len(segment.cluster_ids) != 1:
+                errors.append(f"story segment {segment.segment_id} must reference exactly one cluster")
+            story_references.extend(segment.cluster_ids)
+    duplicates = sorted({cluster_id for cluster_id in story_references if story_references.count(cluster_id) > 1})
+    if duplicates:
+        errors.append(f"duplicate full-story cluster coverage: {duplicates}")
+    missing = sorted(known - set(story_references))
+    if missing:
+        errors.append(f"missing full-story cluster coverage: {missing}")
+    segment_sum = sum(segment.planned_seconds for segment in rundown.segments)
+    if rundown.planned_seconds != segment_sum:
+        errors.append(
+            f"planned_seconds {rundown.planned_seconds} does not equal segment sum {segment_sum}"
+        )
+    if rundown.target_seconds != target_seconds:
+        errors.append(f"target_seconds {rundown.target_seconds} does not equal requested {target_seconds}")
+    lower, upper = duration_bounds(profile, target_seconds)
+    if not lower <= segment_sum <= upper:
+        errors.append(f"planned duration {segment_sum} is outside allowed range {lower}-{upper}")
+    return errors
+
+
+def duration_bounds(profile: EditorialProfile, target_seconds: int) -> tuple[int, int]:
+    if profile.show_format.allow_variable_length:
+        return profile.show_format.minimum_minutes * 60, profile.show_format.maximum_minutes * 60
+    return round(target_seconds * 0.8), round(target_seconds * 1.2)
+
+
+def recalculate_planned_seconds(rundown: Rundown) -> Rundown:
+    return rundown.model_copy(
+        update={"planned_seconds": sum(segment.planned_seconds for segment in rundown.segments)}
+    )
+
+
+def fit_rundown_to_target(rundown: Rundown, profile: EditorialProfile, target_seconds: int) -> Rundown:
+    segment_sum = sum(segment.planned_seconds for segment in rundown.segments)
+    lower, upper = duration_bounds(profile, target_seconds)
+    if lower <= segment_sum <= upper:
+        return recalculate_planned_seconds(rundown)
+    story_segments = [segment for segment in rundown.segments if segment.type == "story"]
+    if not story_segments:
+        return recalculate_planned_seconds(rundown)
+    fixed_seconds = sum(segment.planned_seconds for segment in rundown.segments if segment.type != "story")
+    story_budget = max(45 * len(story_segments), min(upper, target_seconds) - fixed_seconds)
+    per_story = max(45, round(story_budget / len(story_segments)))
+    updated_segments = [
+        segment.model_copy(update={"planned_seconds": per_story})
+        if segment.type == "story"
+        else segment
+        for segment in rundown.segments
+    ]
+    return Rundown(
+        show_date=rundown.show_date,
+        target_seconds=target_seconds,
+        planned_seconds=sum(segment.planned_seconds for segment in updated_segments),
+        segments=updated_segments,
+    )
 
 
 def _persist_rundown(rundown: Rundown, run_dir: Path) -> Rundown:
