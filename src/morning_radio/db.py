@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +14,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS runs (
   run_id TEXT PRIMARY KEY,
   requested_date TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('created', 'complete', 'failed')),
   run_path TEXT NOT NULL,
   started_at TEXT NOT NULL,
   completed_at TEXT
@@ -30,7 +31,7 @@ CREATE TABLE IF NOT EXISTS story_history (
 
 CREATE TABLE IF NOT EXISTS feedback_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT,
+  run_id TEXT REFERENCES runs(run_id),
   created_at TEXT NOT NULL,
   overall TEXT NOT NULL,
   worked TEXT NOT NULL,
@@ -42,21 +43,50 @@ CREATE TABLE IF NOT EXISTS feedback_sessions (
 );
 """
 
+Migration = Callable[[sqlite3.Connection], None]
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
 def initialize(db_path: Path) -> None:
     with connect(db_path) as conn:
-        conn.executescript(SCHEMA)
         conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-            (1, datetime.now().astimezone().isoformat()),
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL
+            )
+            """
         )
+        current_version = latest_migration_version(conn)
+        for version, migration in MIGRATIONS:
+            if version <= current_version:
+                continue
+            with conn:
+                migration(conn)
+                conn.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (version, datetime.now().astimezone().isoformat()),
+                )
+
+
+def latest_migration_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").fetchone()
+    return int(row["version"])
+
+
+def migrate_1(conn: sqlite3.Connection) -> None:
+    conn.executescript(SCHEMA)
+
+
+MIGRATIONS: list[tuple[int, Migration]] = [(1, migrate_1)]
 
 
 def record_run(db_path: Path, run_id: str, requested_date: str, status: str, run_path: Path) -> None:
@@ -93,7 +123,19 @@ def latest_completed_run(db_path: Path) -> str | None:
     return None if row is None else str(row["run_id"])
 
 
+def completed_run_exists(db_path: Path, run_id: str) -> bool:
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM runs WHERE run_id = ? AND status = 'complete'",
+            (run_id,),
+        ).fetchone()
+    return row is not None
+
+
 def insert_feedback(db_path: Path, values: dict[str, str | None]) -> None:
+    run_id = values.get("run_id")
+    if run_id is not None and not completed_run_exists(db_path, run_id):
+        raise ValueError(f"Feedback run_id is not a completed run: {run_id}")
     with connect(db_path) as conn:
         conn.execute(
             """

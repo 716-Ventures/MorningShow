@@ -47,3 +47,47 @@ def test_db_tables_exist(tmp_path: Path) -> None:
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert {"schema_migrations", "runs", "story_history", "feedback_sessions"} <= tables
+
+
+def test_db_initialize_is_idempotent(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "app.db"
+    db.initialize(db_path)
+    db.initialize(db_path)
+
+    with db.connect(db_path) as conn:
+        versions = conn.execute("SELECT version FROM schema_migrations").fetchall()
+
+    assert [row["version"] for row in versions] == [1]
+
+
+def test_feedback_rejects_orphan_run_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "app.db"
+    db.initialize(db_path)
+
+    with pytest.raises(ValueError, match="completed run"):
+        db.insert_feedback(
+            db_path,
+            {
+                "run_id": "missing",
+                "overall": "same",
+                "worked": "good",
+                "change": "none",
+                "should_not_include": "none",
+                "missing_story": "none",
+                "length_feedback": "right",
+                "production_feedback": "good",
+            },
+        )
+
+
+def test_completed_run_validation(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "app.db"
+    db.initialize(db_path)
+    run_path = tmp_path / "runs" / "run-1"
+    db.record_run(db_path, "run-1", "2026-08-15", "created", run_path)
+
+    assert not db.completed_run_exists(db_path, "run-1")
+
+    db.complete_run(db_path, "run-1", "complete")
+
+    assert db.completed_run_exists(db_path, "run-1")

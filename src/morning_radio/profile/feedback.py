@@ -25,6 +25,8 @@ def record_feedback(
     resolved_run = run_id or db.latest_completed_run(db_path)
     if resolved_run is None:
         raise typer.BadParameter("No completed run found. Run ./show morning first or pass a run id.")
+    if not db.completed_run_exists(db_path, resolved_run):
+        raise typer.BadParameter(f"Run id is not a completed run: {resolved_run}")
 
     answers = {
         "run_id": resolved_run,
