@@ -16,14 +16,19 @@ def estimate_seconds(score: StoryScore, profile: EditorialProfile) -> int:
 
 
 def select_stories(
-    scores: list[StoryScore], profile: EditorialProfile, settings: AppSettings, run_dir: Path
+    scores: list[StoryScore],
+    profile: EditorialProfile,
+    settings: AppSettings,
+    run_dir: Path,
+    *,
+    target_minutes: int | None = None,
 ) -> SelectionResult:
     reserved = 90
     if profile.show_format.headline_open:
         reserved += 60
     if profile.show_format.watch_list_close:
         reserved += 60
-    target_seconds = profile.show_format.target_minutes * 60
+    target_seconds = (target_minutes or profile.show_format.target_minutes) * 60
     budget = max(180, target_seconds - reserved)
     selected: list[SelectedStory] = []
     rejected: list[SelectedStory] = []
@@ -41,15 +46,20 @@ def select_stories(
             estimated_seconds=seconds,
             score=score.final_score,
         )
-        if (
-            len(selected) >= settings.selection.maximum_selected_stories
-            or score.final_score < 45
-            or ordinary_negative
-            or too_much_same_subject
-            or would_overrun
-        ):
+        rejection_reason = None
+        if len(selected) >= settings.selection.maximum_selected_stories:
+            rejection_reason = "maximum_selected_stories"
+        elif score.final_score < 45:
+            rejection_reason = "score_below_threshold"
+        elif ordinary_negative:
+            rejection_reason = "negative_preference_below_major_news_threshold"
+        elif too_much_same_subject:
+            rejection_reason = "subject_diversity"
+        elif would_overrun:
+            rejection_reason = "duration_budget"
+        if rejection_reason is not None:
             if score.final_score >= 60:
-                rejected.append(story)
+                rejected.append(story.model_copy(update={"rejection_reason": rejection_reason}))
             continue
         selected.append(story)
         used_subjects.add(subject)

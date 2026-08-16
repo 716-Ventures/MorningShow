@@ -203,6 +203,7 @@ class SelectedStory(BaseModel):
     reason: str
     estimated_seconds: int
     score: int
+    rejection_reason: str | None = None
 
 
 class SelectionResult(BaseModel):

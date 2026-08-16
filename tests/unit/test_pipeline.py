@@ -128,7 +128,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(
         pipeline,
         "select_stories",
-        lambda *args: SimpleNamespace(selected=[], not_selected_high_score=[]),
+        lambda *args, **kwargs: SimpleNamespace(selected=[], not_selected_high_score=[]),
     )
     monkeypatch.setattr(pipeline, "build_dossiers", lambda *args: [dossier])
     monkeypatch.setattr(pipeline, "build_rundown", lambda *args: rundown)

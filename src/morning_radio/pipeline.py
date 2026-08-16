@@ -96,7 +96,13 @@ def _run_pipeline(
         editorial_memory_path=context.root / "data" / "editorial-memory.md",
         db_path=context.root / "data" / "app.db",
     )
-    selected = select_stories(scores, profile, app_settings, context.run_dir)
+    selected = select_stories(
+        scores,
+        profile,
+        app_settings,
+        context.run_dir,
+        target_minutes=target_minutes,
+    )
     context.register_artifact("scored_stories", context.run_dir / "scored-stories.json")
     context.register_artifact("selected_stories", context.run_dir / "selected-stories.json")
 
