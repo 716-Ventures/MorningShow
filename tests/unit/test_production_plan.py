@@ -8,7 +8,9 @@ from morning_radio.audio.production import (
     MusicItem,
     ProductionPlanError,
     SpeechItem,
+    attach_audio_to_plan,
     build_production_plan,
+    build_text_production_plan,
 )
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import ProductionSettings
@@ -60,3 +62,28 @@ def test_unclosed_bed_fails(tmp_path: Path) -> None:
             production_settings(),
             tmp_path / "assets",
         )
+
+
+def test_text_production_plan_validates_assets_before_audio(tmp_path: Path) -> None:
+    plan = build_text_production_plan(
+        "[MUSIC: OPENING]\n\n[HOST]\nHello.\n",
+        tmp_path,
+        False,
+        production_settings(),
+        tmp_path / "assets",
+    )
+    assert isinstance(plan[1], SpeechItem)
+    assert plan[1].text == "Hello."
+    assert plan[1].path is None
+
+
+def test_attach_audio_to_plan_requires_matching_speech_count(tmp_path: Path) -> None:
+    plan = build_text_production_plan(
+        "[HOST]\nHello.\n",
+        tmp_path,
+        True,
+        production_settings(),
+        tmp_path / "assets",
+    )
+    with pytest.raises(ProductionPlanError):
+        attach_audio_to_plan(plan, [])

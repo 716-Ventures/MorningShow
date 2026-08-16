@@ -20,8 +20,10 @@ class ProductionPlanError(RuntimeError):
 
 class SpeechItem(BaseModel):
     type: Literal["speech"] = "speech"
-    path: Path
-    duration_seconds: float
+    path: Path | None = None
+    duration_seconds: float | None = None
+    text: str | None = None
+    host: str | None = None
 
 
 class PauseItem(BaseModel):
@@ -100,9 +102,22 @@ def build_production_plan(
     production: ProductionSettings,
     assets_dir: Path,
 ) -> list[ProductionItem]:
+    plan = build_text_production_plan(script, run_dir, no_assets, production, assets_dir)
+    plan = attach_audio_to_plan(plan, audio)
+    write_production_plan(plan, run_dir)
+    return plan
+
+
+def build_text_production_plan(
+    script: str,
+    run_dir: Path,
+    no_assets: bool,
+    production: ProductionSettings,
+    assets_dir: Path,
+) -> list[ProductionItem]:
     plan: list[ProductionItem] = []
-    audio_index = 0
     bed_active = False
+    current_host = "HOST"
     for raw_line in script.splitlines():
         line = raw_line.strip()
         if not line:
@@ -153,15 +168,44 @@ def build_production_plan(
                     bed_name,
                 )
         elif line in {"[HOST]", "[HOST 2]"} or line.startswith("["):
+            if line in {"[HOST]", "[HOST 2]"}:
+                current_host = line.strip("[]")
             continue
         else:
-            metadata = audio[audio_index]
-            audio_index += 1
-            plan.append(
-                SpeechItem(path=metadata.path, duration_seconds=metadata.duration_seconds)
-            )
+            plan.append(SpeechItem(text=line, host=current_host))
     if bed_active:
         raise ProductionPlanError("A bed was started but never stopped.")
+    write_production_plan(plan, run_dir)
+    return plan
+
+
+def attach_audio_to_plan(
+    plan: list[ProductionItem], audio: list[AudioMetadata]
+) -> list[ProductionItem]:
+    audio_index = 0
+    attached: list[ProductionItem] = []
+    for item in plan:
+        if isinstance(item, SpeechItem):
+            if audio_index >= len(audio):
+                raise ProductionPlanError("Not enough synthesized audio for speech plan.")
+            metadata = audio[audio_index]
+            audio_index += 1
+            attached.append(
+                item.model_copy(
+                    update={
+                        "path": metadata.path,
+                        "duration_seconds": metadata.duration_seconds,
+                    }
+                )
+            )
+        else:
+            attached.append(item)
+    if audio_index != len(audio):
+        raise ProductionPlanError("Synthesized audio count does not match speech plan.")
+    return attached
+
+
+def write_production_plan(plan: list[ProductionItem], run_dir: Path) -> None:
     (run_dir / "production-plan.json").write_text(
         json.dumps(
             PRODUCTION_PLAN_ADAPTER.dump_python(plan, mode="json"),
@@ -171,7 +215,6 @@ def build_production_plan(
         + "\n",
         encoding="utf-8",
     )
-    return plan
 
 
 def maybe_add_asset(

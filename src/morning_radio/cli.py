@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
-import subprocess
 import sys
 from datetime import date, datetime
 from typing import Annotated
 
-import httpx
 import typer
 from rich.console import Console
 
 from morning_radio import db
-from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
+from morning_radio.dependencies import check_ffmpeg, check_llm, check_tts
 from morning_radio.profile.compiler import ProfileError, load_profile
 from morning_radio.profile.feedback import record_feedback
 from morning_radio.profile.interview import run_interview
@@ -80,44 +77,14 @@ def doctor() -> None:
         checks.append(("SQLite initialization", False, str(exc)))
 
     if app_settings is not None:
-        try:
-            response = httpx.get(f"{str(app_settings.llm.base_url).rstrip('/')}/api/tags", timeout=5)
-            response.raise_for_status()
-            names = {model.get("name") for model in response.json().get("models", [])}
-            model_found = app_settings.llm.model in names
-            checks.append(("Ollama reachable", True, str(app_settings.llm.base_url)))
-            checks.append(("Configured LLM model", model_found, app_settings.llm.model))
-        except (httpx.HTTPError, OSError, ValueError) as exc:
-            checks.append(("Ollama reachable", False, str(exc)))
-            checks.append(("Configured LLM model", False, app_settings.llm.model))
+        checks.extend((check.name, check.ok, check.detail) for check in check_llm(app_settings))
 
-    for binary in ("ffmpeg", "ffprobe"):
-        path = shutil.which(binary)
-        if path:
-            try:
-                subprocess.run([path, "-version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                checks.append((binary, True, path))
-            except subprocess.CalledProcessError as exc:
-                checks.append((binary, False, str(exc)))
-        else:
-            checks.append((binary, False, "not found on PATH"))
+    checks.extend((check.name, check.ok, check.detail) for check in check_ffmpeg())
 
     prod = None
     try:
         prod = load_production_settings(base)
-        if prod.tts.engine == "kokoro":
-            importable = kokoro_importable()
-            checks.append(("TTS backend", importable, "kokoro import"))
-            if importable:
-                try:
-                    adapter = build_tts_adapter(prod.tts.engine)
-                    voices = adapter.available_voices()
-                    voice = prod.tts.voice or "af_heart"
-                    checks.append(("Configured TTS voice", voice in voices, voice))
-                except RuntimeError as exc:
-                    checks.append(("Configured TTS voice", False, str(exc)))
-        else:
-            checks.append(("TTS backend", True, prod.tts.engine))
+        checks.extend((check.name, check.ok, check.detail) for check in check_tts(prod))
     except ConfigError as exc:
         checks.append(("TTS backend", False, str(exc)))
 

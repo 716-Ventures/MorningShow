@@ -56,6 +56,8 @@ def mix_and_master(
     active_bed: Path | None = None
     for item in typed_plan:
         if isinstance(item, SpeechItem):
+            if item.path is None:
+                raise AudioMasterError("Speech item has no synthesized audio path.")
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-speech.wav"
             if active_bed is None:

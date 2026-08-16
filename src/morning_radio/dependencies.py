@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+from dataclasses import dataclass
+
+import httpx
+
+from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
+from morning_radio.settings import AppSettings, ProductionSettings
+
+
+@dataclass(frozen=True)
+class DependencyCheck:
+    name: str
+    ok: bool
+    detail: str
+    action: str = ""
+
+
+class DependencyPreflightError(RuntimeError):
+    def __init__(self, checks: list[DependencyCheck]) -> None:
+        self.checks = checks
+        failures = [check for check in checks if not check.ok]
+        message = "; ".join(
+            f"{check.name}: {check.detail}. {check.action}".strip() for check in failures
+        )
+        super().__init__(message or "Dependency preflight failed.")
+
+
+def check_ffmpeg() -> list[DependencyCheck]:
+    checks: list[DependencyCheck] = []
+    for binary in ("ffmpeg", "ffprobe"):
+        path = shutil.which(binary)
+        if path is None:
+            checks.append(
+                DependencyCheck(
+                    binary,
+                    False,
+                    "not found on PATH",
+                    "Install FFmpeg and ensure ffmpeg/ffprobe are on PATH.",
+                )
+            )
+            continue
+        try:
+            subprocess.run(
+                [path, "-version"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            checks.append(DependencyCheck(binary, True, path))
+        except subprocess.CalledProcessError as exc:
+            checks.append(
+                DependencyCheck(binary, False, str(exc), "Reinstall or repair the FFmpeg binary.")
+            )
+    return checks
+
+
+def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
+    try:
+        response = httpx.get(f"{str(app_settings.llm.base_url).rstrip('/')}/api/tags", timeout=5)
+        response.raise_for_status()
+        names = {model.get("name") for model in response.json().get("models", [])}
+        model_found = app_settings.llm.model in names
+        return [
+            DependencyCheck("Ollama reachable", True, str(app_settings.llm.base_url)),
+            DependencyCheck(
+                "Configured LLM model",
+                model_found,
+                app_settings.llm.model,
+                f"Pull or configure model {app_settings.llm.model}.",
+            ),
+        ]
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        return [
+            DependencyCheck(
+                "Ollama reachable",
+                False,
+                str(exc),
+                "Start Ollama and confirm the configured base URL.",
+            ),
+            DependencyCheck(
+                "Configured LLM model",
+                False,
+                app_settings.llm.model,
+                f"Pull or configure model {app_settings.llm.model}.",
+            ),
+        ]
+
+
+def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
+    if production.tts.engine != "kokoro":
+        return [DependencyCheck("TTS backend", True, production.tts.engine)]
+    if not kokoro_importable():
+        return [
+            DependencyCheck(
+                "TTS backend",
+                False,
+                "kokoro import failed",
+                "Install the Kokoro optional runtime before generating audio.",
+            )
+        ]
+    try:
+        adapter = build_tts_adapter(production.tts.engine)
+        voices = adapter.available_voices()
+        voice = production.tts.voice or "af_heart"
+        return [
+            DependencyCheck("TTS backend", True, "kokoro import"),
+            DependencyCheck(
+                "Configured TTS voice",
+                voice in voices,
+                voice,
+                f"Choose one of: {', '.join(voices)}.",
+            ),
+        ]
+    except RuntimeError as exc:
+        return [
+            DependencyCheck(
+                "Configured TTS voice",
+                False,
+                str(exc),
+                "Install the Kokoro optional runtime and configure a valid voice.",
+            )
+        ]
+
+
+def morning_preflight(app_settings: AppSettings, production: ProductionSettings) -> list[DependencyCheck]:
+    checks = [*check_llm(app_settings), *check_tts(production), *check_ffmpeg()]
+    failures = [check for check in checks if not check.ok]
+    if failures:
+        raise DependencyPreflightError(checks)
+    return checks

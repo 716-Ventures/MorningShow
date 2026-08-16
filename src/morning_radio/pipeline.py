@@ -8,7 +8,13 @@ from morning_radio import db
 from morning_radio.artifacts.runs import RunContext, create_run
 from morning_radio.artifacts.sources import write_sources_page
 from morning_radio.audio.master import mix_and_master
-from morning_radio.audio.production import build_production_plan, synthesize_script
+from morning_radio.audio.production import (
+    attach_audio_to_plan,
+    build_text_production_plan,
+    synthesize_script,
+    write_production_plan,
+)
+from morning_radio.dependencies import morning_preflight
 from morning_radio.llm.client import build_llm_client
 from morning_radio.models import CandidateStory, ExtractionResult, StageStatus
 from morning_radio.newsroom.cluster import cluster_stories
@@ -37,6 +43,8 @@ def run_morning(requested_date: date, minutes: int | None, no_assets: bool = Fal
     feed_settings = load_feed_settings(root)
     production_settings = load_production_settings(root)
     target_minutes = minutes or profile.show_format.target_minutes
+    if os.environ.get("MORNING_RADIO_FIXTURE_RUN") != "1":
+        morning_preflight(app_settings, production_settings)
     context = create_run(requested_date, target_minutes, root)
     llm = build_llm_client(app_settings.llm, context.run_dir)
     try:
@@ -135,18 +143,20 @@ def _run_pipeline(
     final_script = verified.script
     context.register_artifact("script_final", context.run_dir / "script-final.md")
 
-    context.transition(StageStatus.SYNTHESIZING)
-    audio = synthesize_script(final_script, production_settings, context.run_dir)
-    plan = build_production_plan(
+    plan = build_text_production_plan(
         final_script,
-        audio,
         context.run_dir,
         no_assets,
         production_settings,
         context.root / "assets",
     )
-    context.register_artifact("raw_audio", context.run_dir / "raw-audio")
     context.register_artifact("production_plan", context.run_dir / "production-plan.json")
+
+    context.transition(StageStatus.SYNTHESIZING)
+    audio = synthesize_script(final_script, production_settings, context.run_dir)
+    plan = attach_audio_to_plan(plan, audio)
+    write_production_plan(plan, context.run_dir)
+    context.register_artifact("raw_audio", context.run_dir / "raw-audio")
 
     context.transition(StageStatus.MIXING)
     episode = mix_and_master(

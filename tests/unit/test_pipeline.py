@@ -120,6 +120,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     )
     synthesized_scripts: list[str] = []
     planned_scripts: list[str] = []
+    order: list[str] = []
 
     monkeypatch.setattr(pipeline, "discover_candidates", lambda *args: [candidate])
     monkeypatch.setattr(pipeline, "extract_articles", lambda *args: [extraction])
@@ -143,6 +144,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     )
 
     def synthesize(script: str, *args) -> list[AudioMetadata]:
+        order.append("synthesize")
         synthesized_scripts.append(script)
         return [
             AudioMetadata(
@@ -153,12 +155,19 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
             )
         ]
 
-    def build_plan(script: str, *args) -> list[dict[str, str]]:
+    def build_text_plan(script: str, *args) -> list[dict[str, str | None]]:
+        order.append("plan")
         planned_scripts.append(script)
+        return [{"type": "speech", "path": None}]
+
+    def attach_audio(plan, audio):
+        order.append("attach")
         return [{"type": "speech", "path": "raw-audio/001-host.wav"}]
 
     monkeypatch.setattr(pipeline, "synthesize_script", synthesize)
-    monkeypatch.setattr(pipeline, "build_production_plan", build_plan)
+    monkeypatch.setattr(pipeline, "build_text_production_plan", build_text_plan)
+    monkeypatch.setattr(pipeline, "attach_audio_to_plan", attach_audio)
+    monkeypatch.setattr(pipeline, "write_production_plan", lambda *args: None)
     monkeypatch.setattr(pipeline, "mix_and_master", lambda *args, **kwargs: context.run_dir / "episode.mp3")
     monkeypatch.setattr(pipeline, "write_sources_page", lambda *args: context.run_dir / "sources.html")
 
@@ -176,3 +185,4 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
 
     assert synthesized_scripts == ["[HOST]\nCorrected final text.\n"]
     assert planned_scripts == ["[HOST]\nCorrected final text.\n"]
+    assert order[:3] == ["plan", "synthesize", "attach"]
