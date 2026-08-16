@@ -30,3 +30,7 @@ class ScriptResponse(BaseModel):
 class VerificationResponse(BaseModel):
     verification: VerificationResult
     corrected_script: str | None = None
+
+
+class FeedbackMemoryResponse(BaseModel):
+    editorial_memory_markdown: str = Field(min_length=1)
