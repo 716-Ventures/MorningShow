@@ -17,8 +17,14 @@ from morning_radio.audio.production import (
     write_production_plan,
 )
 from morning_radio.dependencies import morning_preflight
-from morning_radio.llm.client import build_llm_client
-from morning_radio.models import CandidateStory, ExtractionResult, StageStatus
+from morning_radio.llm.client import LLMClient, build_llm_client
+from morning_radio.models import (
+    CandidateStory,
+    EditorialProfile,
+    ExtractionResult,
+    RunMorningResult,
+    StageStatus,
+)
 from morning_radio.newsroom.cluster import cluster_stories
 from morning_radio.newsroom.dossier import build_dossiers
 from morning_radio.newsroom.extract import extract_articles
@@ -27,6 +33,9 @@ from morning_radio.newsroom.score import score_stories
 from morning_radio.newsroom.select import select_stories
 from morning_radio.profile.compiler import load_profile
 from morning_radio.settings import (
+    AppSettings,
+    FeedSettings,
+    ProductionSettings,
     load_app_settings,
     load_feed_settings,
     load_production_settings,
@@ -50,7 +59,7 @@ def run_morning(
     minutes: int | None,
     no_assets: bool = False,
     root: Path | None = None,
-) -> dict[str, str | int]:
+) -> RunMorningResult:
     root = root or repo_root()
     db.initialize(root / "data" / "app.db")
     profile = load_profile(root)
@@ -90,12 +99,12 @@ def _run_pipeline(
     requested_date: date,
     target_minutes: int,
     no_assets: bool,
-    profile,
-    app_settings,
-    feed_settings,
-    production_settings,
-    llm,
-) -> dict[str, str | int]:
+    profile: EditorialProfile,
+    app_settings: AppSettings,
+    feed_settings: FeedSettings,
+    production_settings: ProductionSettings,
+    llm: LLMClient,
+) -> RunMorningResult:
     context.register_artifact("profile_snapshot", _write_profile_snapshot(context.run_dir, profile))
     context.transition(StageStatus.DISCOVERING)
     if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1":
@@ -204,16 +213,16 @@ def _run_pipeline(
         requested_date.isoformat(),
     )
     context.complete()
-    return {
-        "episode": str(episode.relative_to(context.root)),
-        "sources": str(sources.relative_to(context.root)),
-        "run_id": context.record.run_id,
-        "stories": len(dossiers),
-        "target_minutes": target_minutes,
-    }
+    return RunMorningResult(
+        episode=str(episode.relative_to(context.root)),
+        sources=str(sources.relative_to(context.root)),
+        run_id=context.record.run_id,
+        stories=len(dossiers),
+        target_minutes=target_minutes,
+    )
 
 
-def _write_profile_snapshot(run_dir: Path, profile) -> Path:
+def _write_profile_snapshot(run_dir: Path, profile: EditorialProfile) -> Path:
     path = run_dir / "profile-snapshot.json"
     path.write_text(profile.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return path

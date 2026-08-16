@@ -109,7 +109,7 @@ def load_yaml(path: Path) -> dict:
     return data
 
 
-def _validated(model: type[BaseModel], path: Path) -> BaseModel:
+def _validated[TSettings: BaseModel](model: type[TSettings], path: Path) -> TSettings:
     try:
         return model.model_validate(load_yaml(path))
     except ValidationError as exc:
@@ -118,14 +118,14 @@ def _validated(model: type[BaseModel], path: Path) -> BaseModel:
 
 def load_app_settings(root: Path | None = None) -> AppSettings:
     base = root or repo_root()
-    return _validated(AppSettings, base / "config" / "app.yaml")  # type: ignore[return-value]
+    return _validated(AppSettings, base / "config" / "app.yaml")
 
 
 def load_production_settings(root: Path | None = None) -> ProductionSettings:
     base = root or repo_root()
-    return _validated(ProductionSettings, base / "config" / "production.yaml")  # type: ignore[return-value]
+    return _validated(ProductionSettings, base / "config" / "production.yaml")
 
 
 def load_feed_settings(root: Path | None = None) -> FeedSettings:
     base = root or repo_root()
-    return _validated(FeedSettings, base / "config" / "feeds.yaml")  # type: ignore[return-value]
+    return _validated(FeedSettings, base / "config" / "feeds.yaml")

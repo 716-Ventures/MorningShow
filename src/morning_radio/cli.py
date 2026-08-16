@@ -123,9 +123,14 @@ def morning(
             console.print(f"[red]Run ID:[/red] {exc.run_id}")
             console.print(f"[yellow]Action:[/yellow] {exc.action}")
         raise typer.Exit(1) from exc
-    console.print(f"[green]Episode:[/green] {result['episode']}")
-    console.print(f"[green]Sources:[/green] {result['sources']}")
-    console.print(json.dumps({k: v for k, v in result.items() if k not in {'episode', 'sources'}}, indent=2))
+    console.print(f"[green]Episode:[/green] {result.episode}")
+    console.print(f"[green]Sources:[/green] {result.sources}")
+    console.print(
+        json.dumps(
+            result.model_dump(exclude={"episode", "sources"}),
+            indent=2,
+        )
+    )
 
 
 @app.command()

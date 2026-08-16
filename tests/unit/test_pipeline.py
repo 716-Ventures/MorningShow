@@ -20,6 +20,7 @@ from morning_radio.models import (
     VerificationResult,
     VerifiedScript,
 )
+from morning_radio.profile.compiler import default_profile
 from morning_radio.settings import (
     AppSettings,
     FeedSettings,
@@ -34,6 +35,12 @@ from morning_radio.settings import (
 class RecordingLLM:
     model = "test"
 
+    def generate_text(self, *args, **kwargs) -> str:
+        raise AssertionError("RecordingLLM.generate_text should not be called")
+
+    def generate_structured(self, *args, **kwargs):
+        raise AssertionError("RecordingLLM.generate_structured should not be called")
+
 
 def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
@@ -41,7 +48,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     db.initialize(data_dir / "app.db")
     context = create_run(date(2026, 8, 15), 10, tmp_path)
 
-    profile = SimpleNamespace(model_dump_json=lambda indent: "{}")
+    profile = default_profile()
     app_settings = AppSettings(
         llm=LLMSettings(base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5),
         news=NewsSettings(

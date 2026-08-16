@@ -34,14 +34,14 @@ def test_fixture_morning_run_completes_in_isolated_root(monkeypatch, tmp_path: P
     monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
     result = run_morning(date(2026, 8, 14), minutes=10, no_assets=True, root=root)
 
-    assert str(result["episode"]).endswith("episode.mp3")
-    assert (root / str(result["episode"])).exists()
+    assert result.episode.endswith("episode.mp3")
+    assert (root / result.episode).exists()
     assert (root / "data" / "app.db").exists()
-    stories = result["stories"]
+    stories = result.stories
     assert isinstance(stories, int)
     assert stories > 0
 
-    run_dir = root / "runs" / "2026-08-14" / str(result["run_id"])
+    run_dir = root / "runs" / "2026-08-14" / result.run_id
     extracted = sorted((run_dir / "extracted").glob("*.json"))
     statuses = {
         json.loads(path.read_text(encoding="utf-8"))["extraction_status"]

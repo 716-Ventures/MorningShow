@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 import httpx
@@ -45,7 +46,7 @@ class LLMClient(Protocol):
 
 
 class OllamaClient:
-    def __init__(self, settings: LLMSettings, run_dir):
+    def __init__(self, settings: LLMSettings, run_dir: Path):
         self.settings = settings
         self.model = settings.model
         self.run_dir = run_dir
@@ -168,7 +169,7 @@ class FakeLLM:
         return response_model.model_validate(data)
 
 
-def build_llm_client(settings: LLMSettings, run_dir) -> LLMClient:
+def build_llm_client(settings: LLMSettings, run_dir: Path) -> LLMClient:
     if os.environ.get("MORNING_RADIO_FAKE_LLM") == "1":
         return FakeLLM()
     return OllamaClient(settings, run_dir)

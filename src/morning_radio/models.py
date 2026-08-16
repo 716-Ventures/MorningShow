@@ -57,6 +57,14 @@ class RunRecord(PersistedModel):
     artifact_paths: dict[str, str] = Field(default_factory=dict)
 
 
+class RunMorningResult(PersistedModel):
+    episode: str
+    sources: str
+    run_id: str
+    stories: int = Field(ge=0)
+    target_minutes: int = Field(gt=0)
+
+
 class LocationProfile(PersistedModel):
     home: str
     local_scope: str
