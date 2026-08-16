@@ -4,6 +4,9 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, TypeAdapter
 
 from morning_radio.audio.tts import build_tts_adapter
 from morning_radio.models import AudioMetadata
@@ -13,6 +16,53 @@ from morning_radio.showgen.script import spoken_blocks
 
 class ProductionPlanError(RuntimeError):
     pass
+
+
+class SpeechItem(BaseModel):
+    type: Literal["speech"] = "speech"
+    path: Path
+    duration_seconds: float
+
+
+class PauseItem(BaseModel):
+    type: Literal["pause"] = "pause"
+    milliseconds: int = Field(gt=0)
+
+
+class MusicItem(BaseModel):
+    type: Literal["music"] = "music"
+    directive: str
+    path: Path | None = None
+    optional: bool
+    skipped: bool = False
+
+
+class BumperItem(BaseModel):
+    type: Literal["bumper"] = "bumper"
+    directive: str
+    path: Path | None = None
+    optional: bool
+    skipped: bool = False
+
+
+class BedStartItem(BaseModel):
+    type: Literal["bed_start"] = "bed_start"
+    directive: str
+    path: Path | None = None
+    optional: bool
+    skipped: bool = False
+
+
+class BedStopItem(BaseModel):
+    type: Literal["bed_stop"] = "bed_stop"
+
+
+ProductionItem = Annotated[
+    SpeechItem | PauseItem | MusicItem | BumperItem | BedStartItem | BedStopItem,
+    Field(discriminator="type"),
+]
+
+PRODUCTION_PLAN_ADAPTER = TypeAdapter(list[ProductionItem])
 
 
 def synthesize_script(
@@ -49,8 +99,8 @@ def build_production_plan(
     no_assets: bool,
     production: ProductionSettings,
     assets_dir: Path,
-) -> list[dict]:
-    plan: list[dict] = []
+) -> list[ProductionItem]:
+    plan: list[ProductionItem] = []
     audio_index = 0
     bed_active = False
     for raw_line in script.splitlines():
@@ -59,7 +109,7 @@ def build_production_plan(
             continue
         if line.startswith("[PAUSE:"):
             milliseconds = int(re.findall(r"\d+", line)[0])
-            plan.append({"type": "pause", "milliseconds": milliseconds})
+            plan.append(PauseItem(milliseconds=milliseconds))
         elif line.startswith("[MUSIC:"):
             asset_name = line.removeprefix("[MUSIC:").removesuffix("]").strip().lower()
             if asset_name not in {"opening", "closing"}:
@@ -88,7 +138,7 @@ def build_production_plan(
                 if not bed_active:
                     raise ProductionPlanError("BED STOP appeared without an active bed.")
                 bed_active = False
-                plan.append({"type": "bed_stop"})
+                plan.append(BedStopItem())
             else:
                 if bed_active:
                     raise ProductionPlanError("Nested beds are not supported.")
@@ -108,22 +158,24 @@ def build_production_plan(
             metadata = audio[audio_index]
             audio_index += 1
             plan.append(
-                {
-                    "type": "speech",
-                    "path": str(metadata.path),
-                    "duration_seconds": metadata.duration_seconds,
-                }
+                SpeechItem(path=metadata.path, duration_seconds=metadata.duration_seconds)
             )
     if bed_active:
         raise ProductionPlanError("A bed was started but never stopped.")
     (run_dir / "production-plan.json").write_text(
-        json.dumps(plan, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(
+            PRODUCTION_PLAN_ADAPTER.dump_python(plan, mode="json"),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
     )
     return plan
 
 
 def maybe_add_asset(
-    plan: list[dict],
+    plan: list[ProductionItem],
     asset_dir: Path,
     item_type: str,
     directive: str,
@@ -136,10 +188,27 @@ def maybe_add_asset(
     path = resolve_asset(asset_dir, name)
     if path is None:
         if optional:
-            plan.append({"type": item_type, "directive": directive, "optional": True, "skipped": True})
+            plan.append(_asset_item(item_type, directive, None, optional, skipped=True))
             return
         raise ProductionPlanError(f"Missing required asset for {directive}")
-    plan.append({"type": item_type, "directive": directive, "path": str(path), "optional": optional})
+    plan.append(_asset_item(item_type, directive, path, optional, skipped=False))
+
+
+def _asset_item(
+    item_type: str,
+    directive: str,
+    path: Path | None,
+    optional: bool,
+    *,
+    skipped: bool,
+) -> MusicItem | BumperItem | BedStartItem:
+    if item_type == "music":
+        return MusicItem(directive=directive, path=path, optional=optional, skipped=skipped)
+    if item_type == "bumper":
+        return BumperItem(directive=directive, path=path, optional=optional, skipped=skipped)
+    if item_type == "bed_start":
+        return BedStartItem(directive=directive, path=path, optional=optional, skipped=skipped)
+    raise ProductionPlanError(f"Unknown production item type: {item_type}")
 
 
 def resolve_asset(asset_dir: Path, name: str | None = None) -> Path | None:

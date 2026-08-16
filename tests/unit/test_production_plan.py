@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from morning_radio.audio.production import ProductionPlanError, build_production_plan
+from morning_radio.audio.production import (
+    MusicItem,
+    ProductionPlanError,
+    SpeechItem,
+    build_production_plan,
+)
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import ProductionSettings
 
@@ -39,8 +44,9 @@ def test_optional_missing_asset_is_skipped(tmp_path: Path) -> None:
         production_settings(),
         tmp_path / "assets",
     )
-    assert plan[0]["skipped"] is True
-    assert plan[1]["type"] == "speech"
+    assert isinstance(plan[0], MusicItem)
+    assert plan[0].skipped is True
+    assert isinstance(plan[1], SpeechItem)
 
 
 def test_unclosed_bed_fails(tmp_path: Path) -> None:
