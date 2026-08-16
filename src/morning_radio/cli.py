@@ -108,7 +108,7 @@ def morning(
     no_assets: Annotated[bool, typer.Option(help="Disable music, bumpers, and beds.")] = False,
 ) -> None:
     """Create a complete morning episode and print the MP3 path."""
-    from morning_radio.pipeline import run_morning
+    from morning_radio.pipeline import MorningPipelineError, run_morning
 
     try:
         requested_date = date.fromisoformat(date_) if date_ else datetime.now().astimezone().date()
@@ -118,6 +118,10 @@ def morning(
         result = run_morning(requested_date=requested_date, minutes=minutes, no_assets=no_assets)
     except Exception as exc:
         console.print(f"[red]Morning run failed:[/red] {exc}")
+        if isinstance(exc, MorningPipelineError):
+            console.print(f"[red]Failed stage:[/red] {exc.failed_stage}")
+            console.print(f"[red]Run ID:[/red] {exc.run_id}")
+            console.print(f"[yellow]Action:[/yellow] {exc.action}")
         raise typer.Exit(1) from exc
     console.print(f"[green]Episode:[/green] {result['episode']}")
     console.print(f"[green]Sources:[/green] {result['sources']}")

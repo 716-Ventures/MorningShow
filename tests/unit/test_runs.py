@@ -26,12 +26,16 @@ def test_run_lifecycle_and_failure(tmp_path: Path) -> None:
     assert context.run_json_path.exists()
     context.transition(StageStatus.DISCOVERING)
     context.transition(StageStatus.EXTRACTING)
+    log_text = (context.run_dir / "logs" / "run.log").read_text(encoding="utf-8")
+    assert "stage=discovering status=completed elapsed_ms=" in log_text
     with pytest.raises(RunTransitionError):
         context.transition(StageStatus.WRITING)
     context.fail("extracting", "fixture failure")
     payload = context.run_json_path.read_text()
     assert '"status": "failed"' in payload
     assert '"failed_stage": "extracting"' in payload
+    log_text = (context.run_dir / "logs" / "run.log").read_text(encoding="utf-8")
+    assert "stage=extracting status=failed elapsed_ms=" in log_text
 
 
 def test_db_tables_exist(tmp_path: Path) -> None:

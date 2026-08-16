@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -36,6 +36,7 @@ class RunContext:
     root: Path
     run_dir: Path
     record: RunRecord
+    stage_started_at: datetime | None = None
 
     @property
     def run_json_path(self) -> Path:
@@ -47,8 +48,10 @@ class RunContext:
     def transition(self, status: StageStatus) -> None:
         if status not in LEGAL_TRANSITIONS[self.record.status]:
             raise RunTransitionError(f"Cannot transition {self.record.status} -> {status}")
+        self._log_stage_completed()
         self.record.status = status
         self.save()
+        self.stage_started_at = datetime.now().astimezone()
         log_line(self.run_dir, f"stage={status.value} status=started")
 
     def register_artifact(self, name: str, path: Path) -> None:
@@ -60,6 +63,7 @@ class RunContext:
         self.save()
 
     def fail(self, stage: str, error: str) -> None:
+        self._log_stage_completed(status="failed")
         self.record.status = StageStatus.FAILED
         self.record.failed_stage = stage
         self.record.error = error
@@ -71,11 +75,21 @@ class RunContext:
     def complete(self) -> None:
         if StageStatus.COMPLETE not in LEGAL_TRANSITIONS[self.record.status]:
             raise RunTransitionError(f"Cannot complete from {self.record.status}")
+        self._log_stage_completed()
         self.record.status = StageStatus.COMPLETE
         self.record.completed_at = datetime.now().astimezone()
         self.save()
         log_line(self.run_dir, "stage=complete status=complete")
         db.complete_run(self.root / "data" / "app.db", self.record.run_id, "complete")
+
+    def _log_stage_completed(self, status: str = "completed") -> None:
+        if self.record.status in {StageStatus.CREATED, StageStatus.COMPLETE, StageStatus.FAILED}:
+            return
+        elapsed_ms = ""
+        if self.stage_started_at is not None:
+            elapsed = datetime.now(UTC) - self.stage_started_at.astimezone(UTC)
+            elapsed_ms = f" elapsed_ms={round(elapsed.total_seconds() * 1000)}"
+        log_line(self.run_dir, f"stage={self.record.status.value} status={status}{elapsed_ms}")
 
 
 def create_run(requested_date: date, target_minutes: int, root: Path | None = None) -> RunContext:

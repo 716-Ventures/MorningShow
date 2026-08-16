@@ -37,6 +37,14 @@ from morning_radio.showgen.script import write_script
 from morning_radio.showgen.verify import verify_script
 
 
+class MorningPipelineError(RuntimeError):
+    def __init__(self, message: str, *, run_id: str, failed_stage: str, action: str) -> None:
+        self.run_id = run_id
+        self.failed_stage = failed_stage
+        self.action = action
+        super().__init__(message)
+
+
 def run_morning(
     requested_date: date,
     minutes: int | None,
@@ -69,7 +77,12 @@ def run_morning(
     except Exception as exc:
         if context.record.status is not StageStatus.FAILED:
             context.fail(context.record.status.value, str(exc))
-        raise
+        raise MorningPipelineError(
+            str(exc),
+            run_id=context.record.run_id,
+            failed_stage=context.record.failed_stage or context.record.status.value,
+            action=stage_action(context.record.failed_stage or context.record.status.value),
+        ) from exc
 
 
 def _run_pipeline(
@@ -204,6 +217,22 @@ def _write_profile_snapshot(run_dir: Path, profile) -> Path:
     path = run_dir / "profile-snapshot.json"
     path.write_text(profile.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def stage_action(stage: str) -> str:
+    actions = {
+        StageStatus.DISCOVERING.value: "Check feed configuration and network access.",
+        StageStatus.EXTRACTING.value: "Inspect extracted article artifacts and fetch diagnostics.",
+        StageStatus.CLUSTERING.value: "Inspect candidate clustering artifacts for malformed story data.",
+        StageStatus.SCORING.value: "Check scoring payloads, editorial memory, and model availability.",
+        StageStatus.RESEARCHING.value: "Inspect dossier rejection artifacts and source grounding.",
+        StageStatus.PLANNING.value: "Inspect rundown validation errors and selected story durations.",
+        StageStatus.WRITING.value: "Inspect script-draft.md and writing model diagnostics.",
+        StageStatus.VERIFYING.value: "Inspect verification.json and remove unsupported claims before retrying.",
+        StageStatus.SYNTHESIZING.value: "Check TTS voice configuration and raw-audio manifest.",
+        StageStatus.MIXING.value: "Inspect mix/ FFmpeg command logs and stderr files.",
+    }
+    return actions.get(stage, "Inspect run.json and logs/run.log for the failed stage.")
 
 
 def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list[ExtractionResult]]:
