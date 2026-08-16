@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from contextlib import suppress
 from datetime import date, datetime
 from typing import Annotated
 
@@ -30,10 +31,8 @@ console = Console()
 def configure() -> None:
     """Run the interactive editorial-profile setup interview."""
     existing = None
-    try:
+    with suppress(ProfileError):
         existing = load_profile()
-    except ProfileError:
-        pass
     run_interview(existing)
 
 

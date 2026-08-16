@@ -23,7 +23,7 @@ def build_rundown(
 ) -> Rundown:
     if llm is not None:
         validation_errors: list[str] = []
-        for attempt in range(2):
+        for _attempt in range(2):
             try:
                 response = llm.generate_structured(
                     RUNDOWN_SYSTEM,

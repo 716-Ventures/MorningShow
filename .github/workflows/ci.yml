@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "agent/**", "codex/**"]
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install FFmpeg
+        run: brew install ffmpeg
+      - name: Check lockfile
+        run: uv lock --check
+      - name: Sync
+        run: uv sync --all-extras --dev
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run pyright
+      - name: Tests with coverage
+        run: uv run pytest --cov=morning_radio --cov-branch --cov-report=term-missing -q

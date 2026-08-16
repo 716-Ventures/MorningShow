@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -12,7 +12,7 @@ class PersistedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class StageStatus(str, Enum):
+class StageStatus(StrEnum):
     CREATED = "created"
     DISCOVERING = "discovering"
     EXTRACTING = "extracting"

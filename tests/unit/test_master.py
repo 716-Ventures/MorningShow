@@ -156,7 +156,7 @@ def test_metadata_args_include_episode_fields() -> None:
 
 
 def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:
-    with pytest.raises(AudioMasterError, match="see .*fail-stderr.txt"):
+    with pytest.raises(AudioMasterError, match=r"see .*fail-stderr.txt"):
         run_command(
             ["/bin/sh", "-c", "echo detailed failure >&2; exit 7"],
             tmp_path,
