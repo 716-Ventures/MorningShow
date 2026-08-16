@@ -105,7 +105,7 @@ def _run_pipeline(
     context.register_artifact("script_draft", context.run_dir / "script-draft.md")
 
     context.transition(StageStatus.VERIFYING)
-    verification = verify_script(
+    verified = verify_script(
         script,
         dossiers,
         context.run_dir,
@@ -113,14 +113,15 @@ def _run_pipeline(
         app_settings.verification.maximum_correction_cycles,
     )
     context.register_artifact("verification", context.run_dir / "verification.json")
-    if verification.status != "pass":
+    if verified.verification.status != "pass":
         raise RuntimeError("Verification failed with high-severity issues.")
+    final_script = verified.script
     context.register_artifact("script_final", context.run_dir / "script-final.md")
 
     context.transition(StageStatus.SYNTHESIZING)
-    audio = synthesize_script(script, production_settings, context.run_dir)
+    audio = synthesize_script(final_script, production_settings, context.run_dir)
     plan = build_production_plan(
-        script,
+        final_script,
         audio,
         context.run_dir,
         no_assets,

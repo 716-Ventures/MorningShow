@@ -6,7 +6,7 @@ from pathlib import Path
 from morning_radio.llm.client import LLMClient
 from morning_radio.llm.prompts import VERIFY_SYSTEM
 from morning_radio.llm.schemas import VerificationResponse
-from morning_radio.models import StoryDossier, VerificationIssue, VerificationResult
+from morning_radio.models import StoryDossier, VerificationIssue, VerificationResult, VerifiedScript
 from morning_radio.showgen.script import ScriptError, validate_script
 
 
@@ -16,15 +16,35 @@ def verify_script(
     run_dir: Path,
     llm: LLMClient | None = None,
     maximum_correction_cycles: int = 2,
-) -> VerificationResult:
+) -> VerifiedScript:
     current_script = script
     for cycle in range(maximum_correction_cycles + 1):
         result, corrected_script = _verify_once(current_script, dossiers, run_dir, llm, cycle)
         _persist_iteration(result, run_dir, cycle)
         if result.status == "pass":
-            (run_dir / "script-final.md").write_text(corrected_script or current_script, encoding="utf-8")
+            final_script = corrected_script or current_script
+            try:
+                validate_script(final_script)
+            except ScriptError as exc:
+                result = VerificationResult(
+                    status="fail",
+                    issues=[
+                        VerificationIssue(
+                            severity="high",
+                            category="script_structure",
+                            script_excerpt="",
+                            explanation=str(exc),
+                            supporting_source_ids=[],
+                            required_action="rewrite",
+                        )
+                    ],
+                    corrected_script_required=True,
+                )
+                _persist(result, run_dir)
+                return VerifiedScript(verification=result, script=current_script)
+            (run_dir / "script-final.md").write_text(final_script, encoding="utf-8")
             _persist(result, run_dir)
-            return result
+            return VerifiedScript(verification=result, script=final_script)
         if corrected_script and cycle < maximum_correction_cycles:
             current_script = corrected_script
             (run_dir / f"script-corrected-{cycle + 1}.md").write_text(
@@ -32,7 +52,7 @@ def verify_script(
             )
             continue
         _persist(result, run_dir)
-        return result
+        return VerifiedScript(verification=result, script=current_script)
     raise RuntimeError("Verification loop ended unexpectedly.")
 
 

@@ -254,6 +254,11 @@ class VerificationResult(BaseModel):
     corrected_script_required: bool = False
 
 
+class VerifiedScript(BaseModel):
+    verification: VerificationResult
+    script: str
+
+
 class AudioMetadata(BaseModel):
     voice: str
     text_hash: str

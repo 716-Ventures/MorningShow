@@ -62,14 +62,15 @@ def test_verification_correction_loop_writes_final(tmp_path: Path) -> None:
         recommended_seconds=60,
         source_ids=[],
     )
-    result = verify_script(
+    verified = verify_script(
         "[HOST]\nDraft script.\n",
         [dossier],
         tmp_path,
         CorrectingLLM(),
         maximum_correction_cycles=2,
     )
-    assert result.status == "pass"
+    assert verified.verification.status == "pass"
+    assert verified.script == "[HOST]\nCorrected script.\n"
     assert (tmp_path / "script-final.md").read_text() == "[HOST]\nCorrected script.\n"
     assert (tmp_path / "logs" / "verification-0.json").exists()
     assert (tmp_path / "logs" / "verification-1.json").exists()
