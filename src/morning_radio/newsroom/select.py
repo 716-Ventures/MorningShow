@@ -6,8 +6,6 @@ from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.models import EditorialProfile, SelectedStory, SelectionResult, StoryScore
 from morning_radio.settings import AppSettings
 
-PROFILE_COVERAGE_SCORE_FLOOR = 25
-
 
 def estimate_seconds(score: StoryScore, profile: EditorialProfile) -> int:
     if score.final_score >= 85:
@@ -56,7 +54,6 @@ def select_stories(
                 for score in scores
                 if score.cluster_id not in selected_ids
                 and any(name.casefold() == interest_key for name in score.matched_interests)
-                and score.final_score >= PROFILE_COVERAGE_SCORE_FLOOR
                 and not (
                     score.negative_matches
                     and score.importance < settings.selection.major_news_importance_threshold

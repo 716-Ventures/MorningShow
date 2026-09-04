@@ -202,3 +202,16 @@ def test_selection_reports_interest_without_an_eligible_story(tmp_path: Path) ->
     )
 
     assert result.uncovered_interests == ["Apple Incorporated"]
+
+
+def test_selection_covers_requested_interest_despite_zero_model_score(tmp_path: Path) -> None:
+    result = select_stories(
+        [score("bills", final_score=0, matched_interest="AI")],
+        profile(),
+        settings(),
+        tmp_path,
+        target_minutes=10,
+    )
+
+    assert [item.cluster_id for item in result.selected] == ["bills"]
+    assert result.uncovered_interests == []

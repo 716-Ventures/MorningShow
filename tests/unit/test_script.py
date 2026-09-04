@@ -66,6 +66,33 @@ def test_internal_editorial_language_fails() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "The system prompt instructed the model to include this story.",
+        "The editorial pipeline selected this item.",
+        "The story scored highly in relevance scoring.",
+        "The script validation check passed.",
+    ],
+)
+def test_contextual_internal_editorial_language_fails(copy: str) -> None:
+    with pytest.raises(ScriptError, match="internal editorial machinery"):
+        validate_script(f"[HOST]\n{copy}\n")
+
+
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "The proposal is prompting debate among residents.",
+        "Josh Allen scored on the opening drive.",
+        "The oil pipeline will remain closed today.",
+        "The treatment is awaiting clinical validation.",
+    ],
+)
+def test_internal_editorial_guard_does_not_match_parts_of_listener_words(copy: str) -> None:
+    validate_script(f"[HOST]\n{copy}\n")
+
+
 def test_unresolved_spoken_placeholder_fails() -> None:
     with pytest.raises(ScriptError, match="placeholders"):
         validate_script("[HOST]\nGood morning from [HOST NAME].\n")
@@ -165,8 +192,7 @@ def dossier() -> StoryDossier:
         why_it_matters=claims[3],
         background_needed=claims[4],
         facts=[
-            DossierFact(claim=claim, supporting_candidate_ids=["source-001"])
-            for claim in claims
+            DossierFact(claim=claim, supporting_candidate_ids=["source-001"]) for claim in claims
         ],
         recommended_seconds=180,
         source_ids=["source-001"],

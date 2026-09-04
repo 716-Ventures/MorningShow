@@ -33,19 +33,34 @@ INTERNAL_EDITORIAL_LANGUAGE = (
     "included because",
     "matched interests",
     "model output",
-    "pipeline",
-    "prompt",
     "relevance score",
     "score of",
-    "scored",
-    "scoring",
     "selected story",
-    "validation",
     "why it was selected",
     "why this story was added",
     "why this was added",
     "why this was selected",
 )
+CONTEXTUAL_EDITORIAL_LANGUAGE = {
+    "pipeline": re.compile(
+        r"\b(?:editorial|generation|newsroom|writing) pipeline\b|"
+        r"\bpipeline (?:generated|included|ranked|selected)\b"
+    ),
+    "prompt": re.compile(
+        r"\b(?:editorial|model|system|writing) prompt\b|"
+        r"\b(?:the|this) prompt\b|"
+        r"\bprompt (?:asked|instructed|required|requested|said)\b"
+    ),
+    "scoring": re.compile(
+        r"\b(?:article|item|story|topic) (?:has |was )?scored\b|"
+        r"\b(?:editorial|relevance|story) scoring\b|"
+        r"\bscoring (?:criteria|model|process|system)\b"
+    ),
+    "validation": re.compile(
+        r"\b(?:editorial|model|output|schema|script) validation\b|"
+        r"\bvalidation (?:check|error|gate|process)\b"
+    ),
+}
 GENERIC_DOSSIER_COPY = (
     "this is part of today's latest source set.",
     "it gives useful context for the morning ahead.",
@@ -171,8 +186,12 @@ def validate_listener_facing_copy(line: str) -> None:
         raise ScriptError("Spoken copy may not contain unresolved bracketed placeholders.")
     lowered = line.casefold()
     for phrase in INTERNAL_EDITORIAL_LANGUAGE:
-        if phrase in lowered:
+        pattern = rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])"
+        if re.search(pattern, lowered):
             raise ScriptError(f"Spoken copy may not mention internal editorial machinery: {phrase}")
+    for name, pattern in CONTEXTUAL_EDITORIAL_LANGUAGE.items():
+        if pattern.search(lowered):
+            raise ScriptError(f"Spoken copy may not mention internal editorial machinery: {name}")
 
 
 def normalize_script_format(script: str) -> str:
@@ -203,10 +222,7 @@ def validate_script_quality(
 ) -> None:
     if not dossiers:
         return
-    spoken_words = sum(
-        len(re.findall(r"\b[\w']+\b", text))
-        for _, text in spoken_blocks(script)
-    )
+    spoken_words = sum(len(re.findall(r"\b[\w']+\b", text)) for _, text in spoken_blocks(script))
     minimum_words = len(dossiers) * MIN_WORDS_PER_STORY
     if spoken_words < minimum_words:
         raise ScriptError(
@@ -215,7 +231,9 @@ def validate_script_quality(
         )
     story_sections = _match_story_sections(script, dossiers)
     if len(story_sections) < len(dossiers):
-        raise ScriptError(f"Script covers only {len(story_sections)} of {len(dossiers)} dossier topics.")
+        raise ScriptError(
+            f"Script covers only {len(story_sections)} of {len(dossiers)} dossier topics."
+        )
     segment_seconds = {
         segment.cluster_ids[0]: segment.planned_seconds
         for segment in rundown.segments
@@ -280,9 +298,7 @@ def _sentences_overlap(left: str, right: str) -> bool:
 
 def _title_mentioned(title: str, script: str) -> bool:
     significant = {
-        word.casefold()
-        for word in re.findall(r"[A-Za-z0-9']+", title)
-        if len(word) >= 4
+        word.casefold() for word in re.findall(r"[A-Za-z0-9']+", title) if len(word) >= 4
     }
     if not significant:
         return True
@@ -316,8 +332,7 @@ def _match_story_sections(
         )
         if (
             not ranked
-            or _title_overlap(dossier.working_headline, sections[ranked[0]])
-            < required_overlap
+            or _title_overlap(dossier.working_headline, sections[ranked[0]]) < required_overlap
         ):
             continue
         best_index = ranked[0]
@@ -328,9 +343,7 @@ def _match_story_sections(
 
 def _title_overlap(title: str, text: str) -> int:
     title_words = {
-        word.casefold()
-        for word in re.findall(r"[A-Za-z0-9']+", title)
-        if len(word) >= 4
+        word.casefold() for word in re.findall(r"[A-Za-z0-9']+", title) if len(word) >= 4
     }
     text_words = {word.casefold() for word in re.findall(r"[A-Za-z0-9']+", text)}
     return len(title_words & text_words)
