@@ -107,12 +107,21 @@ class InvalidCorrectionLLM:
     def generate_structured(self, *args, **kwargs):
         response_model = args[2]
         return response_model.model_validate(
-            {
-                "verification": {
-                    "status": "pass",
-                    "issues": [],
-                    "corrected_script_required": False,
-                },
+                {
+                    "verification": {
+                        "status": "fail",
+                        "issues": [
+                            {
+                                "severity": "high",
+                                "category": "unsupported_claim",
+                                "script_excerpt": "Draft script.",
+                                "explanation": "Rewrite required.",
+                                "supporting_source_ids": [],
+                                "required_action": "rewrite",
+                            }
+                        ],
+                        "corrected_script_required": True,
+                    },
                 "corrected_script": "Spoken copy without a host marker.\n",
             }
         )
@@ -228,10 +237,10 @@ def test_pass_with_corrected_script_requires_fresh_cycle(tmp_path: Path) -> None
         llm,
         maximum_correction_cycles=2,
     )
-    assert llm.calls == 2
+    assert llm.calls == 1
     assert verified.verification.status == "pass"
-    assert verified.script == "[HOST]\nCorrected after pass.\n"
-    assert (tmp_path / "script-final.md").read_text() == "[HOST]\nCorrected after pass.\n"
+    assert verified.script == "[HOST]\nDraft script.\n"
+    assert (tmp_path / "script-final.md").read_text() == "[HOST]\nDraft script.\n"
 
 
 def test_invalid_corrected_script_is_rejected(tmp_path: Path) -> None:
@@ -275,7 +284,7 @@ def test_verifier_payload_includes_profile_rundown_and_extractions(tmp_path: Pat
         published_at=datetime(2026, 8, 15, tzinfo=UTC),
     )
     verify_script(
-        "[HOST]\nDraft script.\n",
+        substantive_script(),
         [valid_dossier()],
         tmp_path,
         llm,
@@ -286,7 +295,7 @@ def test_verifier_payload_includes_profile_rundown_and_extractions(tmp_path: Pat
     )
     assert llm.payload["profile"] == {"location": "Buffalo"}
     assert llm.payload["rundown"]["target_seconds"] == 600
-    assert llm.payload["extractions"][0]["candidate_id"] == "source-001"
+    assert llm.payload["source_evidence"][0]["candidate_id"] == "source-001"
 
 
 def test_recoverable_verification_model_error_uses_fallback(tmp_path: Path) -> None:
@@ -305,7 +314,7 @@ def test_recoverable_verification_model_error_uses_fallback(tmp_path: Path) -> N
     assert "timed out" in diagnostic
 
 
-def test_oversized_verification_prompt_skips_llm(tmp_path: Path) -> None:
+def test_verification_prompt_compacts_long_source_evidence(tmp_path: Path) -> None:
     extraction = ExtractionResult(
         candidate_id="source-001",
         url="https://example.com/story",
@@ -317,15 +326,21 @@ def test_oversized_verification_prompt_skips_llm(tmp_path: Path) -> None:
         published_at=datetime(2026, 8, 15, tzinfo=UTC),
     )
 
+    llm = CapturingLLM()
     verified = verify_script(
         "[HOST]\nDraft script.\n",
         [valid_dossier()],
         tmp_path,
-        ExplodingVerificationLLM(),
+        llm,
         maximum_correction_cycles=2,
         extractions=[extraction],
     )
 
     assert verified.verification.status == "pass"
-    diagnostic = (tmp_path / "logs" / "verification-fallback.json").read_text(encoding="utf-8")
-    assert "Verification prompt exceeded" in diagnostic
+    assert len(llm.payload["source_evidence"][0]["text_excerpt"]) == 3000
+    assert not (tmp_path / "logs" / "verification-fallback.json").exists()
+
+
+def substantive_script() -> str:
+    words = " ".join(["context"] * 60)
+    return f"[HOST]\nStory. {words}.\n"

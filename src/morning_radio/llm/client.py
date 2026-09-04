@@ -95,10 +95,14 @@ class OllamaClient:
             try:
                 payload = {
                     "model": self.settings.model,
-                    "system": system_prompt,
+                    "system": (
+                        system_prompt
+                        + "\nThe response must match this JSON Schema exactly: "
+                        + json.dumps(response_model.model_json_schema(), ensure_ascii=False)
+                    ),
                     "prompt": prompt,
                     "stream": False,
-                    "format": "json",
+                    "format": response_model.model_json_schema(),
                 }
                 response = self._client.post(
                     f"{str(self.settings.base_url).rstrip('/')}/api/generate",

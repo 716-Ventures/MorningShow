@@ -22,6 +22,7 @@ from morning_radio.models import (
 )
 
 MAX_LLM_SCORING_PROMPT_CHARS = 60_000
+MAX_LLM_SCORING_CLUSTERS = 18
 
 
 def score_stories(
@@ -37,15 +38,35 @@ def score_stories(
     editorial_memory = load_editorial_memory(editorial_memory_path)
     history = load_story_history(db_path, clusters)
     extraction_payload = build_extraction_payload(clusters, extractions or [])
+    heuristic_scores = _build_heuristic_scores(
+        clusters,
+        profile,
+        history,
+        extraction_payload,
+    )
     if llm is not None:
+        heuristic_by_id = {score.cluster_id: score for score in heuristic_scores}
+        llm_clusters = sorted(
+            clusters,
+            key=lambda cluster: heuristic_by_id[cluster.cluster_id].final_score,
+            reverse=True,
+        )[:MAX_LLM_SCORING_CLUSTERS]
+        llm_cluster_ids = {cluster.cluster_id for cluster in llm_clusters}
         scoring_prompt = json.dumps(
             {
                 "profile": profile.model_dump(mode="json"),
                 "editorial_memory": editorial_memory,
-                "clusters": [item.model_dump(mode="json") for item in clusters],
-                "extraction_evidence": extraction_payload,
-                "story_history": history,
-                "required_cluster_ids": [item.cluster_id for item in clusters],
+                "clusters": [compact_cluster(item) for item in llm_clusters],
+                "extraction_evidence": {
+                    cluster_id: extraction_payload.get(cluster_id, [])
+                    for cluster_id in llm_cluster_ids
+                },
+                "story_history": {
+                    cluster.fingerprint: history[cluster.fingerprint]
+                    for cluster in llm_clusters
+                    if cluster.fingerprint in history
+                },
+                "required_cluster_ids": [item.cluster_id for item in llm_clusters],
             },
             ensure_ascii=False,
         )
@@ -63,18 +84,26 @@ def score_stories(
                 },
             )
         else:
-            return _score_with_llm(scoring_prompt, clusters, profile, history, run_dir, llm, extraction_payload)
-    return _score_with_heuristics(clusters, profile, history, run_dir, extraction_payload)
+            return _score_with_llm(
+                scoring_prompt,
+                llm_clusters,
+                profile,
+                history,
+                run_dir,
+                llm,
+                heuristic_scores,
+            )
+    return _persist_scores(heuristic_scores, run_dir)
 
 
 def _score_with_llm(
     scoring_prompt: str,
-    clusters: list[Cluster],
+    requested_clusters: list[Cluster],
     profile: EditorialProfile,
     history: dict[str, dict[str, str | int | None]],
     run_dir: Path,
     llm: LLMClient,
-    extraction_payload: dict[str, list[dict[str, str | int | None]]],
+    fallback_scores: list[StoryScore],
 ) -> list[StoryScore]:
     try:
         response = llm.generate_structured(
@@ -84,11 +113,18 @@ def _score_with_llm(
             stage="scoring",
             prompt_type="story_scores",
         )
-        expected = {item.cluster_id for item in clusters}
+        expected = {item.cluster_id for item in requested_clusters}
         received = {item.cluster_id for item in response.scores}
         if expected <= received:
+            model_scores = apply_score_modifiers(
+                [score for score in response.scores if score.cluster_id in expected],
+                requested_clusters,
+                profile,
+                history,
+            )
+            model_ids = {score.cluster_id for score in model_scores}
             return _persist_scores(
-                apply_score_modifiers(response.scores, clusters, profile, history),
+                [*model_scores, *(score for score in fallback_scores if score.cluster_id not in model_ids)],
                 run_dir,
             )
     except (LLMError, ValidationError) as exc:
@@ -100,7 +136,7 @@ def _score_with_llm(
                 "fixture_fallback": allows_fixture_fallback(llm),
             },
         )
-    return _score_with_heuristics(clusters, profile, history, run_dir, extraction_payload)
+    return _persist_scores(fallback_scores, run_dir)
 
 
 def _score_with_heuristics(
@@ -108,6 +144,18 @@ def _score_with_heuristics(
     profile: EditorialProfile,
     history: dict[str, dict[str, str | int | None]],
     run_dir: Path,
+    extraction_payload: dict[str, list[dict[str, str | int | None]]],
+) -> list[StoryScore]:
+    return _persist_scores(
+        _build_heuristic_scores(clusters, profile, history, extraction_payload),
+        run_dir,
+    )
+
+
+def _build_heuristic_scores(
+    clusters: list[Cluster],
+    profile: EditorialProfile,
+    history: dict[str, dict[str, str | int | None]],
     extraction_payload: dict[str, list[dict[str, str | int | None]]],
 ) -> list[StoryScore]:
     interest_terms = build_interest_terms(profile)
@@ -152,7 +200,19 @@ def _score_with_heuristics(
                 final_score=final,
             )
         )
-    return _persist_scores(apply_score_modifiers(scores, clusters, profile, history), run_dir)
+    return apply_score_modifiers(scores, clusters, profile, history)
+
+
+def compact_cluster(cluster: Cluster) -> dict[str, str | int | list[str] | None]:
+    return {
+        "cluster_id": cluster.cluster_id,
+        "canonical_title": cluster.canonical_title,
+        "source_count": cluster.source_count,
+        "latest_published_at": cluster.latest_published_at.isoformat()
+        if cluster.latest_published_at
+        else None,
+        "topic_hints": cluster.topic_hints,
+    }
 
 
 def build_interest_terms(profile: EditorialProfile) -> dict[str, Interest]:
@@ -283,9 +343,8 @@ def build_extraction_payload(
             {
                 "candidate_id": candidate_id,
                 "title": extraction_by_id[candidate_id].title,
-                "url": extraction_by_id[candidate_id].url,
                 "word_count": extraction_by_id[candidate_id].word_count,
-                "excerpt": extraction_by_id[candidate_id].text[:800],
+                "excerpt": extraction_by_id[candidate_id].text[:500],
             }
             for candidate_id in cluster.candidate_ids
             if candidate_id in extraction_by_id

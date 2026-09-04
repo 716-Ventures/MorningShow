@@ -3,6 +3,38 @@ from __future__ import annotations
 from morning_radio.llm.schemas import DossierResponse, RundownResponse, SameEventDecision
 
 
+def test_rundown_response_repairs_model_arithmetic() -> None:
+    response = RundownResponse.model_validate(
+        {
+            "rundown": {
+                "show_date": "2026-09-04",
+                "target_seconds": 600,
+                "planned_seconds": 999,
+                "segments": [
+                    {
+                        "segment_id": "story-1",
+                        "type": "story",
+                        "title": "Story",
+                        "cluster_ids": ["cluster-001"],
+                        "planned_seconds": 300,
+                        "purpose": "Explain the story",
+                    },
+                    {
+                        "segment_id": "closing",
+                        "type": "closing",
+                        "title": "Closing",
+                        "cluster_ids": [],
+                        "planned_seconds": 30,
+                        "purpose": "Close the show",
+                    },
+                ],
+            }
+        }
+    )
+
+    assert response.rundown.planned_seconds == 330
+
+
 def test_same_event_accepts_common_local_model_aliases() -> None:
     decision = SameEventDecision.model_validate(
         {

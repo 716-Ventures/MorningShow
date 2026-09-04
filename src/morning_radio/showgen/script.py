@@ -4,9 +4,12 @@ import json
 import re
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from morning_radio.artifacts.io import atomic_write_json, atomic_write_text
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import SCRIPT_SYSTEM
+from morning_radio.llm.schemas import ScriptResponse
 from morning_radio.models import EditorialProfile, Rundown, StoryDossier
 
 DIRECTIVE_PATTERNS = {
@@ -59,6 +62,7 @@ STORY_TRANSITIONS = (
     "Closer to the day ahead",
     "Another story to know",
 )
+MIN_WORDS_PER_STORY = 55
 
 
 class ScriptError(RuntimeError):
@@ -72,26 +76,41 @@ def write_script(
     run_dir: Path,
     llm: LLMClient | None = None,
 ) -> str:
-    if llm is not None and not has_upstream_model_fallback(run_dir, llm):
+    if llm is not None:
         try:
-            script = llm.generate_text(
+            response = llm.generate_structured(
                 SCRIPT_SYSTEM,
                 json.dumps(
                     {
+                        "task": (
+                            "Write the complete morning radio script. Give every story a substantive "
+                            "brief with multiple grounded details and useful context."
+                        ),
                         "profile": profile.model_dump(mode="json"),
                         "rundown": rundown.model_dump(mode="json"),
+                        "story_word_targets": {
+                            segment.cluster_ids[0]: round(
+                                segment.planned_seconds * DEFAULT_WPM / 60
+                            )
+                            for segment in rundown.segments
+                            if segment.type == "story" and segment.cluster_ids
+                        },
                         "dossiers": [item.model_dump(mode="json") for item in dossiers],
                     },
                     ensure_ascii=False,
                 ),
+                ScriptResponse,
                 stage="writing",
                 prompt_type="script",
             )
+            script = normalize_script_format(response.script)
             validate_script(script)
+            validate_script_quality(script, rundown, dossiers)
             script = adjust_script_duration_if_needed(script, rundown, llm)
+            validate_script_quality(script, rundown, dossiers)
             atomic_write_text(run_dir / "script-draft.md", script)
             return script
-        except (LLMError, ScriptError) as exc:
+        except (LLMError, ScriptError, ValidationError) as exc:
             atomic_write_json(
                 run_dir / "logs" / "script-fallback.json",
                 {
@@ -125,25 +144,9 @@ def write_script(
     lines.extend(["[HOST]", "That's the show for now. Have a good morning.", "[MUSIC: CLOSING]"])
     script = "\n\n".join(lines) + "\n"
     validate_script(script)
+    validate_script_quality(script, rundown, dossiers)
     atomic_write_text(run_dir / "script-draft.md", script)
     return script
-
-
-def has_upstream_model_fallback(run_dir: Path, llm: LLMClient) -> bool:
-    if allows_fixture_fallback(llm):
-        return False
-    logs_dir = run_dir / "logs"
-    if any(
-        (logs_dir / filename).exists()
-        for filename in (
-            "scoring-fallback.json",
-            "rundown-fallback.json",
-            "verification-fallback.json",
-        )
-    ):
-        return True
-    dossier_dir = run_dir / "dossiers"
-    return dossier_dir.exists() and any(dossier_dir.glob("*-fallback.json"))
 
 
 def validate_script(script: str) -> None:
@@ -164,10 +167,74 @@ def validate_script(script: str) -> None:
 
 
 def validate_listener_facing_copy(line: str) -> None:
+    if "[" in line or "]" in line:
+        raise ScriptError("Spoken copy may not contain unresolved bracketed placeholders.")
     lowered = line.casefold()
     for phrase in INTERNAL_EDITORIAL_LANGUAGE:
         if phrase in lowered:
             raise ScriptError(f"Spoken copy may not mention internal editorial machinery: {phrase}")
+
+
+def normalize_script_format(script: str) -> str:
+    script = re.sub(
+        r"\bThis is\s+\[HOST NAME]\s+with\b",
+        "Here is",
+        script,
+        flags=re.IGNORECASE,
+    )
+    script = re.sub(r"\bOpen,\s+AI\b", "OpenAI", script, flags=re.IGNORECASE)
+    script = re.sub(r"\bHugging,\s+Face\b", "Hugging Face", script, flags=re.IGNORECASE)
+    normalized_lines: list[str] = []
+    unwrapped = script.replace("```text", "").replace("```markdown", "").replace("```", "")
+    for raw_line in unwrapped.splitlines():
+        line = raw_line.strip()
+        inline_host = re.match(r"^(\[HOST(?: 2)?])\s+(.+)$", line)
+        if inline_host:
+            normalized_lines.extend([inline_host.group(1), "", inline_host.group(2)])
+        else:
+            normalized_lines.append(raw_line)
+    return "\n".join(normalized_lines).strip() + "\n"
+
+
+def validate_script_quality(
+    script: str,
+    rundown: Rundown,
+    dossiers: list[StoryDossier],
+) -> None:
+    if not dossiers:
+        return
+    spoken_words = sum(
+        len(re.findall(r"\b[\w']+\b", text))
+        for _, text in spoken_blocks(script)
+    )
+    minimum_words = len(dossiers) * MIN_WORDS_PER_STORY
+    if spoken_words < minimum_words:
+        raise ScriptError(
+            f"Script is too shallow for {len(dossiers)} stories: "
+            f"{spoken_words} spoken words; requires at least {minimum_words}."
+        )
+    story_sections = _match_story_sections(script, dossiers)
+    if len(story_sections) < len(dossiers):
+        raise ScriptError(f"Script covers only {len(story_sections)} of {len(dossiers)} dossier topics.")
+    segment_seconds = {
+        segment.cluster_ids[0]: segment.planned_seconds
+        for segment in rundown.segments
+        if segment.type == "story" and segment.cluster_ids
+    }
+    for dossier in dossiers:
+        section = story_sections[dossier.cluster_id]
+        section_words = len(re.findall(r"\b[\w']+\b", section))
+        if section_words < 40:
+            raise ScriptError(
+                f"Story {dossier.cluster_id} is too shallow: {section_words} spoken words."
+            )
+        planned_seconds = segment_seconds.get(dossier.cluster_id, dossier.recommended_seconds)
+        maximum_words = max(100, round(planned_seconds * DEFAULT_WPM / 60 * 1.15))
+        if section_words > maximum_words:
+            raise ScriptError(
+                f"Story {dossier.cluster_id} is too long: {section_words} spoken words; "
+                f"maximum {maximum_words}."
+            )
 
 
 def story_script_paragraph(dossier: StoryDossier, story_index: int) -> str:
@@ -176,14 +243,97 @@ def story_script_paragraph(dossier: StoryDossier, story_index: int) -> str:
     what_is_new = meaningful_dossier_copy(dossier.what_is_new_today)
     why_it_matters = meaningful_dossier_copy(dossier.why_it_matters)
     transition = STORY_TRANSITIONS[min(story_index - 1, len(STORY_TRANSITIONS) - 1)]
-    sentences = [f"{transition}: {title}."]
-    if what_happened:
-        sentences.append(what_happened)
-    if what_is_new:
-        sentences.append(f"The latest: {what_is_new}")
-    if why_it_matters:
-        sentences.append(f"The bigger point: {why_it_matters}")
-    return " ".join(sentences)
+    details = _distinct_sentences([what_happened, what_is_new, why_it_matters], title)
+    if sum(len(sentence.split()) for sentence in details) < 80:
+        details = _distinct_sentences(
+            [*details, *(clean_spoken_copy(fact.claim) for fact in dossier.facts)],
+            title,
+        )
+    return " ".join([f"{transition}: {title}.", *details])
+
+
+def _distinct_sentences(candidates: list[str], title: str) -> list[str]:
+    selected: list[str] = []
+    normalized_selected: list[str] = []
+    for candidate in candidates:
+        for sentence in re.split(r"(?<=[.!?])\s+", candidate):
+            cleaned = remove_redundant_lead(clean_spoken_copy(sentence), title)
+            if not cleaned:
+                continue
+            normalized = re.sub(r"[^a-z0-9]+", " ", cleaned.casefold()).strip()
+            if any(_sentences_overlap(normalized, prior) for prior in normalized_selected):
+                continue
+            selected.append(cleaned)
+            normalized_selected.append(normalized)
+    return selected
+
+
+def _sentences_overlap(left: str, right: str) -> bool:
+    if left == right or left in right or right in left:
+        return True
+    left_tokens = set(left.split())
+    right_tokens = set(right.split())
+    if not left_tokens or not right_tokens:
+        return False
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens)) >= 0.65
+
+
+def _title_mentioned(title: str, script: str) -> bool:
+    significant = {
+        word.casefold()
+        for word in re.findall(r"[A-Za-z0-9']+", title)
+        if len(word) >= 4
+    }
+    if not significant:
+        return True
+    script_words = {word.casefold() for word in re.findall(r"[A-Za-z0-9']+", script)}
+    required = min(2, len(significant))
+    return len(significant & script_words) >= required
+
+
+def _match_story_sections(
+    script: str,
+    dossiers: list[StoryDossier],
+) -> dict[str, str]:
+    sections = [text for _, text in spoken_blocks(script)]
+    available = set(range(len(sections)))
+    matches: dict[str, str] = {}
+    for dossier in dossiers:
+        required_overlap = min(
+            2,
+            len(
+                {
+                    word.casefold()
+                    for word in re.findall(r"[A-Za-z0-9']+", dossier.working_headline)
+                    if len(word) >= 4
+                }
+            ),
+        )
+        ranked = sorted(
+            available,
+            key=lambda index: _title_overlap(dossier.working_headline, sections[index]),
+            reverse=True,
+        )
+        if (
+            not ranked
+            or _title_overlap(dossier.working_headline, sections[ranked[0]])
+            < required_overlap
+        ):
+            continue
+        best_index = ranked[0]
+        matches[dossier.cluster_id] = sections[best_index]
+        available.remove(best_index)
+    return matches
+
+
+def _title_overlap(title: str, text: str) -> int:
+    title_words = {
+        word.casefold()
+        for word in re.findall(r"[A-Za-z0-9']+", title)
+        if len(word) >= 4
+    }
+    text_words = {word.casefold() for word in re.findall(r"[A-Za-z0-9']+", text)}
+    return len(title_words & text_words)
 
 
 def meaningful_dossier_copy(text: str) -> str:
@@ -281,7 +431,7 @@ def adjust_script_duration_if_needed(script: str, rundown: Rundown, llm: LLMClie
     upper = rundown.planned_seconds * (1 + SCRIPT_DURATION_TOLERANCE)
     if lower <= estimate <= upper:
         return script
-    adjusted = llm.generate_text(
+    response = llm.generate_structured(
         SCRIPT_SYSTEM,
         json.dumps(
             {
@@ -292,9 +442,11 @@ def adjust_script_duration_if_needed(script: str, rundown: Rundown, llm: LLMClie
             },
             ensure_ascii=False,
         ),
+        ScriptResponse,
         stage="writing",
         prompt_type="script_duration_adjustment",
     )
+    adjusted = normalize_script_format(response.script)
     validate_script(adjusted)
     return adjusted
 

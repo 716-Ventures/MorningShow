@@ -57,11 +57,27 @@ class RundownResponse(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def accept_unwrapped_rundown(cls, value: Any) -> Any:
-        if not isinstance(value, dict) or "rundown" in value:
+        if not isinstance(value, dict):
             return value
-        if "show_date" in value and "segments" in value:
-            return {"rundown": value}
-        return value
+        normalized = dict(value)
+        if "rundown" not in normalized and "show_date" in normalized and "segments" in normalized:
+            normalized = {"rundown": normalized}
+        rundown = normalized.get("rundown")
+        if isinstance(rundown, dict) and isinstance(rundown.get("segments"), list):
+            segment_seconds = [
+                segment.get("planned_seconds")
+                for segment in rundown["segments"]
+                if isinstance(segment, dict)
+            ]
+            if segment_seconds and all(isinstance(seconds, int) for seconds in segment_seconds):
+                total_seconds = sum(
+                    seconds for seconds in segment_seconds if isinstance(seconds, int)
+                )
+                normalized["rundown"] = {
+                    **rundown,
+                    "planned_seconds": total_seconds,
+                }
+        return normalized
 
 
 class ScriptResponse(BaseModel):

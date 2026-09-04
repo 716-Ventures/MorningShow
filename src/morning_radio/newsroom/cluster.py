@@ -142,11 +142,16 @@ def should_merge(
     left_title = normalize_title(left.title)
     right_title = normalize_title(right.title)
     similarity = token_similarity(left, right)
+    shared_tokens = title_tokens(left.title) & title_tokens(right.title)
     if left_title == right_title:
         return True, 1.0, None
     if similarity >= HIGH_CONFIDENCE_SIMILARITY and within_time_block(left, right):
         return True, similarity, None
-    if similarity < AMBIGUOUS_SIMILARITY or not within_time_block(left, right):
+    if (
+        similarity < AMBIGUOUS_SIMILARITY
+        or len(shared_tokens) < 2
+        or not within_time_block(left, right)
+    ):
         return False, similarity, None
     if llm is None:
         return False, similarity, None

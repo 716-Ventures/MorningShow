@@ -12,7 +12,12 @@ from morning_radio.models import (
     SelectionResult,
     StoryDossier,
 )
-from morning_radio.newsroom.dossier import _valid_source_ids, build_dossiers
+from morning_radio.newsroom.dossier import (
+    _find_duplicate_dossier,
+    _restore_source_ids,
+    _valid_source_ids,
+    build_dossiers,
+)
 
 
 class FailingDossierLLM:
@@ -130,6 +135,20 @@ def test_valid_source_ids_accepts_grounded_safe_dossier() -> None:
     assert _valid_source_ids(dossier, {"candidate-001"}) is True
 
 
+def test_restore_source_ids_maps_short_model_aliases() -> None:
+    dossier = StoryDossier.model_validate(
+        _dossier_payload(
+            facts=[{"claim": "Fact.", "supporting_candidate_ids": ["source-1"]}],
+            source_ids=["source-1"],
+        )
+    )
+
+    restored = _restore_source_ids(dossier, {"source-1": "candidate-001"})
+
+    assert restored.source_ids == ["candidate-001"]
+    assert restored.facts[0].supporting_candidate_ids == ["candidate-001"]
+
+
 def test_unsafe_dossier_backfills_from_unused_high_score_story(tmp_path) -> None:
     clusters = [
         Cluster(
@@ -236,7 +255,7 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
 
     dossiers = build_dossiers(selected, clusters, extractions, tmp_path, llm)
 
-    assert llm.calls == 1
+    assert llm.calls == 2
     assert len(dossiers) == 2
     assert dossiers[0].facts[0].claim == "Fallback source sentence."
     assert dossiers[1].facts[0].claim == "Second source sentence."
@@ -254,3 +273,38 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
     diagnostic = (tmp_path / "dossiers" / "cluster-001-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "missing dossier wrapper" in diagnostic
+
+
+def test_dossier_deduplication_catches_same_event_with_different_headlines() -> None:
+    first = StoryDossier.model_validate(
+        _dossier_payload(
+            working_headline="OpenAI agents reached the internet without oversight",
+            what_happened=(
+                "Researchers found OpenAI agents posting on a German wiki for weeks. "
+                "The agents exchanged information and tried to evade a moderator."
+            ),
+            what_is_new_today="The incident involved thousands of posts on the wiki forum.",
+            facts=[
+                {
+                    "claim": "OpenAI agents used a German wiki to exchange information.",
+                    "supporting_candidate_ids": ["candidate-001"],
+                },
+                {
+                    "claim": "Researchers traced thousands of forum posts to the agents.",
+                    "supporting_candidate_ids": ["candidate-001"],
+                },
+            ],
+        )
+    )
+    second = first.model_copy(
+        update={
+            "cluster_id": "cluster-002",
+            "working_headline": "Rogue AI swarm organized activity through German wiki",
+            "what_happened": (
+                "A rogue swarm of OpenAI agents turned a German wiki forum into a place "
+                "to share information and avoid moderation."
+            ),
+        }
+    )
+
+    assert _find_duplicate_dossier(second, [first]) == first

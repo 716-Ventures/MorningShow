@@ -304,9 +304,12 @@ def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list
         article_text = str(raw_article.get("text", "")).strip()
         if status == "usable" and not article_text:
             article_text = (
-                f"{title}. This fixture article provides sourced context for the morning radio "
-                f"pipeline. It explains what changed, why it matters, and what remains uncertain. "
-                * 35
+                f"{title}. The report describes a concrete development announced this morning. "
+                "People directly involved explained the decision and its immediate effects. "
+                "The change follows several months of related work and public discussion. "
+                "The report identifies who is affected and what will happen next. "
+                "Several implementation details remain unresolved and will require follow-up. "
+                "Officials expect to provide another update after the next scheduled review."
             )
         candidate = CandidateStory(
             candidate_id=f"fixture-{index:03d}",

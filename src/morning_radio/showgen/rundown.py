@@ -21,7 +21,7 @@ def build_rundown(
     run_dir: Path,
     llm: LLMClient | None = None,
 ) -> Rundown:
-    if llm is not None and not has_upstream_model_fallback(run_dir):
+    if llm is not None:
         validation_errors: list[str] = []
         for _attempt in range(2):
             try:
@@ -117,13 +117,6 @@ def build_rundown(
     )
     rundown = fit_rundown_to_target(rundown, profile, target_minutes * 60)
     return _persist_rundown(rundown, run_dir)
-
-
-def has_upstream_model_fallback(run_dir: Path) -> bool:
-    if (run_dir / "logs" / "scoring-fallback.json").exists():
-        return True
-    dossier_dir = run_dir / "dossiers"
-    return dossier_dir.exists() and any(dossier_dir.glob("*-fallback.json"))
 
 
 def validate_rundown(

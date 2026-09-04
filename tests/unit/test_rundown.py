@@ -67,14 +67,18 @@ class FailingRundownLLM:
         raise LLMInvalidResponseError("missing rundown wrapper")
 
 
-class ExplodingRundownLLM:
+class CountingFailingRundownLLM:
     model = "small-local-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
 
     def generate_text(self, *args, **kwargs):
         return ""
 
     def generate_structured(self, *args, **kwargs):
-        raise AssertionError("planning LLM should be skipped after upstream fallback")
+        self.calls += 1
+        raise LLMInvalidResponseError("independent planning failure")
 
 
 def profile() -> EditorialProfile:
@@ -186,19 +190,21 @@ def test_recoverable_rundown_model_error_uses_fallback_with_diagnostic(
     assert "missing rundown wrapper" in diagnostic
 
 
-def test_upstream_model_fallback_skips_rundown_llm(tmp_path: Path) -> None:
+def test_upstream_model_fallback_does_not_skip_rundown_llm(tmp_path: Path) -> None:
     fallback_path = tmp_path / "dossiers" / "cluster-001-fallback.json"
     fallback_path.parent.mkdir()
     fallback_path.write_text("{}", encoding="utf-8")
 
+    llm = CountingFailingRundownLLM()
     rundown = build_rundown(
         date(2026, 8, 15),
         10,
         profile(),
         [dossier("cluster-001")],
         tmp_path,
-        ExplodingRundownLLM(),
+        llm,
     )
 
+    assert llm.calls == 1
     assert (tmp_path / "rundown.json").exists()
     assert any(segment.cluster_ids == ["cluster-001"] for segment in rundown.segments)

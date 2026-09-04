@@ -18,7 +18,7 @@ from morning_radio.models import (
     VerificationResult,
     VerifiedScript,
 )
-from morning_radio.showgen.script import ScriptError, validate_script
+from morning_radio.showgen.script import ScriptError, validate_script, validate_script_quality
 
 MAX_LLM_VERIFICATION_PROMPT_CHARS = 80_000
 
@@ -47,6 +47,8 @@ def verify_script(
             extractions=extractions,
         )
         _persist_iteration(result, run_dir, cycle)
+        if result.status == "pass":
+            corrected_script = None
         if corrected_script and corrected_script != current_script:
             try:
                 validate_script(corrected_script)
@@ -104,6 +106,8 @@ def _verify_once(
     issues: list[VerificationIssue] = []
     try:
         validate_script(script)
+        if rundown is not None:
+            validate_script_quality(script, rundown, dossiers)
     except ScriptError as exc:
         issues.append(
             VerificationIssue(
@@ -146,24 +150,19 @@ def _verify_once(
                 "dossiers": [item.model_dump(mode="json") for item in dossiers],
                 "profile": _dump_optional_model(profile),
                 "rundown": _dump_optional_model(rundown),
-                "extractions": [item.model_dump(mode="json") for item in extractions or []],
+                "source_evidence": compact_source_evidence(dossiers, extractions or []),
                 "correction_cycle": cycle,
             },
             ensure_ascii=False,
         )
         fixture_fallback = allows_fixture_fallback(llm)
         oversized_prompt = len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
-        upstream_fallback = has_upstream_model_fallback(run_dir)
-        if not fixture_fallback and (oversized_prompt or upstream_fallback):
+        if not fixture_fallback and oversized_prompt:
             atomic_write_json(
                 run_dir / "logs" / "verification-fallback.json",
                 {
                     "model": llm.model,
-                    "reason": (
-                        "Verification prompt exceeded local model guardrail."
-                        if len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
-                        else "Upstream model fallback was used."
-                    ),
+                    "reason": "Verification prompt exceeded local model guardrail.",
                     "input_character_count": len(verification_prompt),
                     "fixture_fallback": fixture_fallback,
                 },
@@ -223,15 +222,27 @@ def _dump_optional_model(value: Any | None) -> Any | None:
     return value
 
 
-def has_upstream_model_fallback(run_dir: Path) -> bool:
-    logs_dir = run_dir / "logs"
-    if any(
-        (logs_dir / filename).exists()
-        for filename in ("scoring-fallback.json", "rundown-fallback.json")
-    ):
-        return True
-    dossier_dir = run_dir / "dossiers"
-    return dossier_dir.exists() and any(dossier_dir.glob("*-fallback.json"))
+def compact_source_evidence(
+    dossiers: list[StoryDossier],
+    extractions: list[ExtractionResult],
+) -> list[dict[str, Any]]:
+    relevant_ids = {
+        source_id
+        for dossier in dossiers
+        for source_id in dossier.source_ids
+    }
+    return [
+        {
+            "candidate_id": extraction.candidate_id,
+            "title": extraction.title,
+            "published_at": extraction.published_at.isoformat()
+            if extraction.published_at
+            else None,
+            "text_excerpt": extraction.text[:3000],
+        }
+        for extraction in extractions
+        if extraction.candidate_id in relevant_ids
+    ][:12]
 
 
 def _persist(result: VerificationResult, run_dir: Path) -> None:

@@ -84,14 +84,18 @@ class RecoverableScoringErrorLLM:
         raise LLMError("schema drift")
 
 
-class ExplodingScoringLLM:
+class BoundedFailingScoringLLM:
     model = "small-local-model"
+
+    def __init__(self) -> None:
+        self.payload: dict = {}
 
     def generate_text(self, *args, **kwargs) -> str:
         return ""
 
     def generate_structured(self, *args, **kwargs):
-        raise AssertionError("LLM should not be called for oversized scoring prompts")
+        self.payload = json.loads(args[1])
+        raise LLMError("bounded scoring fixture failure")
 
 
 def profile(
@@ -342,16 +346,18 @@ def test_scoring_recoverable_model_error_uses_fallback_with_diagnostic(tmp_path:
     assert "schema drift" in diagnostic
 
 
-def test_oversized_scoring_prompt_skips_llm_with_diagnostic(tmp_path: Path) -> None:
+def test_large_candidate_set_sends_bounded_scoring_prompt(tmp_path: Path) -> None:
+    llm = BoundedFailingScoringLLM()
     scores = score_stories(
         [numbered_cluster(index) for index in range(80)],
         profile(),
         tmp_path,
-        ExplodingScoringLLM(),
+        llm,
         extractions=[numbered_extraction(index) for index in range(80)],
     )
 
     assert len(scores) == 80
+    assert len(llm.payload["clusters"]) == 18
+    assert len(json.dumps(llm.payload)) < 60_000
     diagnostic = (tmp_path / "logs" / "scoring-fallback.json").read_text(encoding="utf-8")
-    assert "Scoring prompt exceeded" in diagnostic
-    assert "input_character_count" in diagnostic
+    assert "bounded scoring fixture failure" in diagnostic

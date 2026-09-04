@@ -21,8 +21,10 @@ from morning_radio.models import (
 from morning_radio.showgen.script import (
     ScriptError,
     estimate_spoken_seconds,
+    normalize_script_format,
     spoken_blocks,
     validate_script,
+    validate_script_quality,
     write_script,
 )
 
@@ -30,21 +32,15 @@ from morning_radio.showgen.script import (
 class FailingScriptLLM:
     model = "small-local-model"
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def generate_text(self, *args, **kwargs):
         raise LLMError("timed out")
 
     def generate_structured(self, *args, **kwargs):
-        raise AssertionError("unused")
-
-
-class ExplodingScriptLLM:
-    model = "small-local-model"
-
-    def generate_text(self, *args, **kwargs):
-        raise AssertionError("writing LLM should be skipped")
-
-    def generate_structured(self, *args, **kwargs):
-        raise AssertionError("unused")
+        self.calls += 1
+        raise LLMError("timed out")
 
 
 def test_valid_script_blocks() -> None:
@@ -70,6 +66,11 @@ def test_internal_editorial_language_fails() -> None:
         )
 
 
+def test_unresolved_spoken_placeholder_fails() -> None:
+    with pytest.raises(ScriptError, match="placeholders"):
+        validate_script("[HOST]\nGood morning from [HOST NAME].\n")
+
+
 def test_invalid_pause_argument_fails() -> None:
     with pytest.raises(ScriptError):
         validate_script("[HOST]\nHello.\n\n[PAUSE: nope]\n")
@@ -93,6 +94,15 @@ def test_malformed_directive_fails() -> None:
 def test_estimate_spoken_seconds_counts_words_and_pauses() -> None:
     script = "[HOST]\nOne two three four.\n\n[PAUSE: 1000]\n"
     assert estimate_spoken_seconds(script, wpm=60) == 5
+
+
+def test_normalize_script_format_splits_inline_host_marker() -> None:
+    normalized = normalize_script_format(
+        "```text\n[HOST] This is [HOST NAME] with news from Open, AI.\n```\n"
+    )
+
+    assert normalized == "[HOST]\n\nHere is news from OpenAI.\n"
+    validate_script(normalized)
 
 
 def profile() -> EditorialProfile:
@@ -140,22 +150,34 @@ def rundown() -> Rundown:
 
 
 def dossier() -> StoryDossier:
+    claims = [
+        "The company released a new artificial intelligence system for software developers.",
+        "The release includes tools for testing code and tracing failures across services.",
+        "Developers can run the system locally or connect it to an existing hosted project.",
+        "The company says the change is intended to shorten debugging and review cycles.",
+        "Pricing and broad availability have not yet been announced for every customer tier.",
+    ]
     return StoryDossier(
         cluster_id="cluster-001",
-        working_headline="Story",
-        what_happened="Fact.",
-        what_is_new_today="New.",
-        why_it_matters="Matters.",
-        background_needed="None.",
-        facts=[DossierFact(claim="Fact.", supporting_candidate_ids=["source-001"])],
+        working_headline="Artificial intelligence developer tools",
+        what_happened=" ".join(claims[:2]),
+        what_is_new_today=claims[2],
+        why_it_matters=claims[3],
+        background_needed=claims[4],
+        facts=[
+            DossierFact(claim=claim, supporting_candidate_ids=["source-001"])
+            for claim in claims
+        ],
         recommended_seconds=180,
         source_ids=["source-001"],
     )
 
 
 def test_recoverable_script_model_error_uses_fallback(tmp_path) -> None:
-    script = write_script(profile(), rundown(), [dossier()], tmp_path, FailingScriptLLM())
+    llm = FailingScriptLLM()
+    script = write_script(profile(), rundown(), [dossier()], tmp_path, llm)
 
+    assert llm.calls == 1
     assert "Good morning" in script
     assert (tmp_path / "script-draft.md").exists()
     diagnostic = (tmp_path / "logs" / "script-fallback.json").read_text(encoding="utf-8")
@@ -189,12 +211,24 @@ def test_fallback_script_uses_radio_copy_instead_of_dossier_labels(tmp_path) -> 
     assert "The UN General Assembly has voted to replace the traditional world map." in script
 
 
-def test_upstream_model_fallback_skips_script_llm(tmp_path) -> None:
+def test_upstream_model_fallback_does_not_skip_script_llm(tmp_path) -> None:
     fallback_path = tmp_path / "dossiers" / "cluster-001-fallback.json"
     fallback_path.parent.mkdir()
     fallback_path.write_text("{}", encoding="utf-8")
 
-    script = write_script(profile(), rundown(), [dossier()], tmp_path, ExplodingScriptLLM())
+    llm = FailingScriptLLM()
+    script = write_script(profile(), rundown(), [dossier()], tmp_path, llm)
 
+    assert llm.calls == 1
     assert "Good morning" in script
     assert (tmp_path / "script-draft.md").exists()
+
+
+def test_script_quality_rejects_headline_reader_copy() -> None:
+    shallow = (
+        "[HOST]\nGood morning.\n\n[HOST]\n"
+        "Artificial intelligence developer tools. The company released a new system.\n"
+    )
+
+    with pytest.raises(ScriptError, match="too shallow"):
+        validate_script_quality(shallow, rundown(), [dossier()])
