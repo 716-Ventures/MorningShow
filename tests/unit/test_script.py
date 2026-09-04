@@ -163,6 +163,32 @@ def test_recoverable_script_model_error_uses_fallback(tmp_path) -> None:
     assert "timed out" in diagnostic
 
 
+def test_fallback_script_uses_radio_copy_instead_of_dossier_labels(tmp_path) -> None:
+    ugly_dossier = dossier().model_copy(
+        update={
+            "working_headline": "UN votes to adopt new world map to reflect Africa's true size",
+            "what_happened": (
+                "UN votes to adopt new world map to reflect Africa's true size - Published "
+                "The UN General Assembly has voted to replace the traditional world map."
+            ),
+            "what_is_new_today": "This is part of today's latest source set.",
+            "why_it_matters": "It gives useful context for the morning ahead.",
+            "uncertainties": ["Single-source story; phrase cautiously."],
+        }
+    )
+
+    script = write_script(profile(), rundown(), [ugly_dossier], tmp_path, FailingScriptLLM())
+
+    assert "Ahead this morning:" in script
+    assert "What is new today:" not in script
+    assert "Why it matters:" not in script
+    assert "One caution:" not in script
+    assert "Single-source story" not in script
+    assert "Published" not in script
+    assert script.count("UN votes to adopt new world map to reflect Africa's true size") == 2
+    assert "The UN General Assembly has voted to replace the traditional world map." in script
+
+
 def test_upstream_model_fallback_skips_script_llm(tmp_path) -> None:
     fallback_path = tmp_path / "dossiers" / "cluster-001-fallback.json"
     fallback_path.parent.mkdir()

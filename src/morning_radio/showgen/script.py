@@ -20,6 +20,7 @@ DEFAULT_WPM = 155
 SCRIPT_DURATION_TOLERANCE = 0.2
 MIN_PAUSE_MS = 100
 MAX_PAUSE_MS = 5000
+HEADLINE_PREVIEW_LIMIT = 4
 INTERNAL_EDITORIAL_LANGUAGE = (
     "added because",
     "configured editorial profile",
@@ -42,6 +43,22 @@ INTERNAL_EDITORIAL_LANGUAGE = (
     "why this story was added",
     "why this was added",
     "why this was selected",
+)
+GENERIC_DOSSIER_COPY = (
+    "this is part of today's latest source set.",
+    "it gives useful context for the morning ahead.",
+)
+SOURCE_BOILERPLATE_PATTERNS = (
+    re.compile(r"\s+-\s+Published\s+", re.IGNORECASE),
+    re.compile(r"\bPublished\s+", re.IGNORECASE),
+    re.compile(r"\bYou're reading a newsletter from [^.]+\.?", re.IGNORECASE),
+)
+STORY_TRANSITIONS = (
+    "First up",
+    "Also this morning",
+    "In the wider picture",
+    "Closer to the day ahead",
+    "Another story to know",
 )
 
 
@@ -90,28 +107,25 @@ def write_script(
         f"Good morning. This is your personal morning radio for {rundown.show_date.strftime('%B %-d, %Y')}."
     )
     if profile.show_format.headline_open:
-        headline_titles = [item.working_headline for item in dossiers[:5]]
-        lines.append("Here is the shape of the morning: " + "; ".join(headline_titles) + ".")
+        headline_titles = [clean_spoken_copy(item.working_headline) for item in dossiers[:HEADLINE_PREVIEW_LIMIT]]
+        if len(dossiers) > HEADLINE_PREVIEW_LIMIT:
+            headline_titles.append("a few other stories worth watching")
+        lines.append("Ahead this morning: " + join_for_radio(headline_titles) + ".")
         lines.append("[PAUSE: 500]")
+    story_index = 0
     for segment in rundown.segments:
         if segment.type != "story":
             continue
+        story_index += 1
         dossier = dossier_by_id[segment.cluster_ids[0]]
-        lines.extend(
-            [
-                "[HOST]",
-                f"Now, {dossier.working_headline}. {dossier.what_happened}",
-                f"What is new today: {dossier.what_is_new_today}",
-                f"Why it matters: {dossier.why_it_matters}",
-            ]
-        )
-        if dossier.uncertainties:
-            lines.append("One caution: " + " ".join(dossier.uncertainties))
+        lines.extend(["[HOST]", story_script_paragraph(dossier, story_index)])
+        caution = uncertainty_sentence(dossier.uncertainties)
+        if caution:
+            lines.append(caution)
         lines.append("[PAUSE: 650]")
     if profile.show_format.watch_list_close:
-        watch = "; ".join(item.working_headline for item in dossiers[:3])
-        lines.extend(["[HOST]", f"What to watch next: {watch}."])
-    lines.extend(["[HOST]", "That is the show. Have a good morning.", "[MUSIC: CLOSING]"])
+        lines.extend(["[HOST]", watch_list_sentence(dossiers)])
+    lines.extend(["[HOST]", "That's the show for now. Have a good morning.", "[MUSIC: CLOSING]"])
     script = "\n\n".join(lines) + "\n"
     validate_script(script)
     atomic_write_text(run_dir / "script-draft.md", script)
@@ -157,6 +171,78 @@ def validate_listener_facing_copy(line: str) -> None:
     for phrase in INTERNAL_EDITORIAL_LANGUAGE:
         if phrase in lowered:
             raise ScriptError(f"Spoken copy may not mention internal editorial machinery: {phrase}")
+
+
+def story_script_paragraph(dossier: StoryDossier, story_index: int) -> str:
+    title = clean_spoken_copy(dossier.working_headline)
+    what_happened = remove_redundant_lead(clean_spoken_copy(dossier.what_happened), title)
+    what_is_new = meaningful_dossier_copy(dossier.what_is_new_today)
+    why_it_matters = meaningful_dossier_copy(dossier.why_it_matters)
+    transition = STORY_TRANSITIONS[min(story_index - 1, len(STORY_TRANSITIONS) - 1)]
+    sentences = [f"{transition}: {title}."]
+    if what_happened:
+        sentences.append(what_happened)
+    if what_is_new:
+        sentences.append(f"The latest: {what_is_new}")
+    if why_it_matters:
+        sentences.append(f"The bigger point: {why_it_matters}")
+    return " ".join(sentences)
+
+
+def meaningful_dossier_copy(text: str) -> str:
+    cleaned = clean_spoken_copy(text)
+    if cleaned.casefold() in GENERIC_DOSSIER_COPY:
+        return ""
+    return cleaned
+
+
+def clean_spoken_copy(text: str) -> str:
+    cleaned = " ".join(text.split())
+    for pattern in SOURCE_BOILERPLATE_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    return " ".join(cleaned.split()).strip()
+
+
+def remove_redundant_lead(text: str, title: str) -> str:
+    if not text:
+        return ""
+    normalized_text = text.casefold()
+    normalized_title = title.casefold()
+    if normalized_text == normalized_title:
+        return ""
+    if normalized_text.startswith(normalized_title):
+        trimmed = text[len(title) :].lstrip(" .:-")
+        return trimmed
+    return text
+
+
+def uncertainty_sentence(uncertainties: list[str]) -> str | None:
+    useful = [
+        clean_spoken_copy(item)
+        for item in uncertainties
+        if "single-source story" not in item.casefold()
+    ]
+    if not useful:
+        return None
+    return "One note of caution: " + " ".join(useful)
+
+
+def watch_list_sentence(dossiers: list[StoryDossier]) -> str:
+    if len(dossiers) <= 1:
+        return "I'll keep an eye on how this develops."
+    watch = join_for_radio([clean_spoken_copy(item.working_headline) for item in dossiers[:3]])
+    return f"I'll keep an eye on {watch} as the day develops."
+
+
+def join_for_radio(items: list[str]) -> str:
+    cleaned = [item for item in items if item]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return f"{'; '.join(cleaned[:-1])}; and {cleaned[-1]}"
 
 
 def parse_directive(line: str) -> str | None:
