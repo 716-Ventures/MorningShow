@@ -15,10 +15,10 @@ done
 
 if ! python3 - <<'PY'
 import sys
-raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
+raise SystemExit(0 if (3, 12) <= sys.version_info < (3, 14) else 1)
 PY
 then
-  echo "Python 3.12 or newer is required. Install uv or run with a Python 3.12+ interpreter." >&2
+  echo "Python 3.12 or 3.13 is required. Install uv or run with a compatible interpreter." >&2
   exit 1
 fi
 
