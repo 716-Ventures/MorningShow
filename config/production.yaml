@@ -1,3 +1,5 @@
+generate_audio: false
+
 tts:
   engine: kokoro
   voice: null

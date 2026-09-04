@@ -41,6 +41,7 @@ def doctor() -> None:
     """Check local runtime dependencies and configuration."""
     base = repo_root()
     checks: list[tuple[str, bool, str]] = []
+    production_settings = None
 
     checks.append(
         (
@@ -61,7 +62,7 @@ def doctor() -> None:
 
     try:
         app_settings = load_app_settings(base)
-        load_production_settings(base)
+        production_settings = load_production_settings(base)
         feeds = load_feed_settings(base)
         checks.append(("Config files", True, "valid"))
     except ConfigError as exc:
@@ -78,14 +79,9 @@ def doctor() -> None:
     if app_settings is not None:
         checks.extend((check.name, check.ok, check.detail) for check in check_llm(app_settings))
 
-    checks.extend((check.name, check.ok, check.detail) for check in check_ffmpeg())
-
-    prod = None
-    try:
-        prod = load_production_settings(base)
-        checks.extend((check.name, check.ok, check.detail) for check in check_tts(prod))
-    except ConfigError as exc:
-        checks.append(("TTS backend", False, str(exc)))
+    if production_settings is not None and production_settings.generate_audio:
+        checks.extend((check.name, check.ok, check.detail) for check in check_ffmpeg())
+        checks.extend((check.name, check.ok, check.detail) for check in check_tts(production_settings))
 
     if feeds is not None:
         enabled = [feed for feed in feeds.feeds if feed.enabled]
@@ -106,7 +102,7 @@ def morning(
     date_: Annotated[str | None, typer.Option("--date", help="Episode date as YYYY-MM-DD.")] = None,
     no_assets: Annotated[bool, typer.Option(help="Disable music, bumpers, and beds.")] = False,
 ) -> None:
-    """Create a complete morning episode and print the MP3 path."""
+    """Create a morning script and, when enabled, its audio episode."""
     from morning_radio.pipeline import MorningPipelineError, run_morning
 
     try:
@@ -122,11 +118,13 @@ def morning(
             console.print(f"[red]Run ID:[/red] {exc.run_id}")
             console.print(f"[yellow]Action:[/yellow] {exc.action}")
         raise typer.Exit(1) from exc
-    console.print(f"[green]Episode:[/green] {result.episode}")
+    console.print(f"[green]Script:[/green] {result.script}")
+    if result.episode is not None:
+        console.print(f"[green]Episode:[/green] {result.episode}")
     console.print(f"[green]Sources:[/green] {result.sources}")
     console.print(
         json.dumps(
-            result.model_dump(exclude={"episode", "sources"}),
+            result.model_dump(exclude={"script", "episode", "sources"}),
             indent=2,
         )
     )

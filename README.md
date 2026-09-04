@@ -15,18 +15,18 @@ The operator interface is the repository-root `./show` command:
 
 ## Setup
 
-The intended runtime is macOS on Apple Silicon with Python 3.12, `uv`, Ollama, local TTS, FFmpeg, and FFprobe.
+The intended runtime is macOS on Apple Silicon with Python 3.12, `uv`, and Ollama. Audio generation is currently disabled while script quality is being developed, so local TTS, FFmpeg, and FFprobe are optional.
 
 ```bash
 uv sync
-# Include the local Kokoro TTS stack used by the default production config:
-uv sync --extra tts
 ./show doctor
 ./show configure
 ./show morning --minutes 10 --no-assets
 ```
 
-Generated episodes and intermediate artifacts are written under `runs/YYYY-MM-DD/<run-id>/`. The final command prints the path to `episode.mp3` and `sources.html` when successful.
+Generated scripts and intermediate artifacts are written under `runs/YYYY-MM-DD/<run-id>/`. The final command prints the paths to `script-final.md` and `sources.html` when successful.
+
+To reactivate MP3 generation, set `generate_audio: true` in `config/production.yaml` and install the audio runtime with `uv sync --extra tts`. Audio-enabled runs additionally require Kokoro, FFmpeg, and FFprobe.
 
 ## Local Dependencies
 
@@ -37,15 +37,15 @@ Generated episodes and intermediate artifacts are written under `runs/YYYY-MM-DD
 - `config/app.yaml`, `config/feeds.yaml`, and `config/production.yaml`
 - SQLite state
 - Ollama reachability and configured model
-- FFmpeg and FFprobe
-- TTS adapter availability
+- FFmpeg and FFprobe when audio generation is enabled
+- TTS adapter availability when audio generation is enabled
 - at least one enabled feed
 
 The POC uses live public feeds by default. Automated tests use fixtures and fake model/audio adapters so orchestration can be verified without internet access or a live local model.
 
 ## Offline Fixture Mode
 
-The normal morning command requires live feeds, Ollama, the configured local model, Kokoro, FFmpeg, and FFprobe. For reproducible development tests, the pipeline also supports an explicit fixture mode:
+The normal morning command requires live feeds, Ollama, and the configured local model. For reproducible development tests, the pipeline also supports an explicit fixture mode:
 
 ```bash
 MORNING_RADIO_FIXTURE_RUN=1 \
@@ -54,4 +54,4 @@ MORNING_RADIO_FAKE_TTS=1 \
 ./show morning --minutes 10 --no-assets
 ```
 
-This mode uses the offline fixture corpus under `tests/fixtures/morning-run/`, deterministic fake model responses, and tone WAV speech. It still uses FFmpeg/FFprobe for the final MP3 when available.
+This mode uses the offline fixture corpus under `tests/fixtures/morning-run/` and deterministic fake model responses. When audio generation is enabled, it also uses tone WAV speech and FFmpeg/FFprobe for the final MP3.

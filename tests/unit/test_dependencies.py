@@ -91,3 +91,18 @@ def test_morning_preflight_failure_includes_corrective_action(monkeypatch) -> No
         assert "Install FFmpeg" in str(exc)
     else:
         raise AssertionError("Expected DependencyPreflightError")
+
+
+def test_morning_preflight_skips_audio_dependencies_when_disabled(monkeypatch) -> None:
+    production = production_settings().model_copy(update={"generate_audio": False})
+    monkeypatch.setattr("morning_radio.dependencies.check_llm", lambda settings: [])
+    monkeypatch.setattr(
+        "morning_radio.dependencies.check_tts",
+        lambda settings: (_ for _ in ()).throw(AssertionError("TTS should not be checked")),
+    )
+    monkeypatch.setattr(
+        "morning_radio.dependencies.check_ffmpeg",
+        lambda: (_ for _ in ()).throw(AssertionError("FFmpeg should not be checked")),
+    )
+
+    assert morning_preflight(app_settings(), production) == []

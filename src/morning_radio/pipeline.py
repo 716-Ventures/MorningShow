@@ -175,34 +175,9 @@ def _run_pipeline(
     if verified.verification.status != "pass":
         raise RuntimeError("Verification failed with high-severity issues.")
     final_script = verified.script
-    context.register_artifact("script_final", context.run_dir / "script-final.md")
+    script_path = context.run_dir / "script-final.md"
+    context.register_artifact("script_final", script_path)
 
-    plan = build_text_production_plan(
-        final_script,
-        context.run_dir,
-        no_assets,
-        production_settings,
-        context.root / "assets",
-    )
-    context.register_artifact("production_plan", context.run_dir / "production-plan.json")
-
-    context.transition(StageStatus.SYNTHESIZING)
-    audio = synthesize_script(final_script, production_settings, context.run_dir, profile=profile)
-    plan = attach_audio_to_plan(plan, audio)
-    write_production_plan(plan, context.run_dir)
-    context.register_artifact("raw_audio", context.run_dir / "raw-audio")
-
-    context.transition(StageStatus.MIXING)
-    episode = mix_and_master(
-        plan,
-        production_settings,
-        context.run_dir,
-        planned_seconds=None
-        if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1"
-        else production_plan_seconds(plan),
-        episode_title=f"Personal Morning Radio {requested_date.isoformat()}",
-        episode_date=requested_date.isoformat(),
-    )
     sources = write_sources_page(
         rundown,
         dossiers,
@@ -212,8 +187,37 @@ def _run_pipeline(
         final_script=final_script,
         run_id=context.record.run_id,
     )
-    context.register_artifact("episode", episode)
     context.register_artifact("sources", sources)
+
+    episode: Path | None = None
+    if production_settings.generate_audio:
+        plan = build_text_production_plan(
+            final_script,
+            context.run_dir,
+            no_assets,
+            production_settings,
+            context.root / "assets",
+        )
+        context.register_artifact("production_plan", context.run_dir / "production-plan.json")
+
+        context.transition(StageStatus.SYNTHESIZING)
+        audio = synthesize_script(final_script, production_settings, context.run_dir, profile=profile)
+        plan = attach_audio_to_plan(plan, audio)
+        write_production_plan(plan, context.run_dir)
+        context.register_artifact("raw_audio", context.run_dir / "raw-audio")
+
+        context.transition(StageStatus.MIXING)
+        episode = mix_and_master(
+            plan,
+            production_settings,
+            context.run_dir,
+            planned_seconds=None
+            if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1"
+            else production_plan_seconds(plan),
+            episode_title=f"Personal Morning Radio {requested_date.isoformat()}",
+            episode_date=requested_date.isoformat(),
+        )
+        context.register_artifact("episode", episode)
     dossier_cluster_ids = {dossier.cluster_id for dossier in dossiers}
     db.update_story_history(
         context.root / "data" / "app.db",
@@ -226,7 +230,8 @@ def _run_pipeline(
     )
     context.complete()
     return RunMorningResult(
-        episode=str(episode.relative_to(context.root)),
+        script=str(script_path.relative_to(context.root)),
+        episode=str(episode.relative_to(context.root)) if episode is not None else None,
         sources=str(sources.relative_to(context.root)),
         run_id=context.record.run_id,
         stories=len(dossiers),

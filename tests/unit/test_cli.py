@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from morning_radio.cli import app
+from morning_radio.models import RunMorningResult
 from morning_radio.pipeline import MorningPipelineError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +50,30 @@ def test_morning_failure_prints_stage_and_action(monkeypatch) -> None:
     assert "mixing" in result.stdout
     assert "run-123" in result.stdout
     assert "Inspect mix logs." in result.stdout
+
+
+def test_morning_script_only_run_prints_script_without_episode(monkeypatch) -> None:
+    import morning_radio.pipeline
+
+    monkeypatch.setattr(
+        morning_radio.pipeline,
+        "run_morning",
+        lambda *args, **kwargs: RunMorningResult(
+            script="runs/2026-08-15/run-123/script-final.md",
+            sources="runs/2026-08-15/run-123/sources.html",
+            run_id="run-123",
+            stories=3,
+            target_minutes=10,
+        ),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["morning", "--date", "2026-08-15"])
+
+    assert result.exit_code == 0
+    assert "Script:" in result.stdout
+    assert "script-final.md" in result.stdout
+    assert "Episode:" not in result.stdout
 
 
 def test_show_help_runs_from_other_working_directory(tmp_path: Path) -> None:

@@ -37,7 +37,7 @@ LEGAL_TRANSITIONS: dict[StageStatus, set[StageStatus]] = {
     StageStatus.RESEARCHING: {StageStatus.PLANNING, StageStatus.FAILED},
     StageStatus.PLANNING: {StageStatus.WRITING, StageStatus.FAILED},
     StageStatus.WRITING: {StageStatus.VERIFYING, StageStatus.FAILED},
-    StageStatus.VERIFYING: {StageStatus.SYNTHESIZING, StageStatus.FAILED},
+    StageStatus.VERIFYING: {StageStatus.SYNTHESIZING, StageStatus.COMPLETE, StageStatus.FAILED},
     StageStatus.SYNTHESIZING: {StageStatus.MIXING, StageStatus.FAILED},
     StageStatus.MIXING: {StageStatus.COMPLETE, StageStatus.FAILED},
     StageStatus.COMPLETE: set(),
@@ -58,7 +58,8 @@ class RunRecord(PersistedModel):
 
 
 class RunMorningResult(PersistedModel):
-    episode: str
+    script: str
+    episode: str | None = None
     sources: str
     run_id: str
     stories: int = Field(ge=0)

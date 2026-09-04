@@ -126,7 +126,10 @@ def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
 
 
 def morning_preflight(app_settings: AppSettings, production: ProductionSettings) -> list[DependencyCheck]:
-    checks = [*check_llm(app_settings), *check_tts(production), *check_ffmpeg()]
+    checks = [*check_llm(app_settings)]
+    if production.generate_audio:
+        checks.extend(check_tts(production))
+        checks.extend(check_ffmpeg())
     failures = [check for check in checks if not check.ok]
     if failures:
         raise DependencyPreflightError(checks)

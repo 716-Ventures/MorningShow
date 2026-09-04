@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from morning_radio.settings import ConfigError, load_app_settings, load_feed_settings
+from morning_radio.settings import (
+    ConfigError,
+    load_app_settings,
+    load_feed_settings,
+    load_production_settings,
+)
 
 
 def copy_config(tmp_path: Path) -> None:
@@ -17,8 +22,10 @@ def test_valid_config_loads(tmp_path: Path) -> None:
     copy_config(tmp_path)
     settings = load_app_settings(tmp_path)
     feeds = load_feed_settings(tmp_path)
+    production = load_production_settings(tmp_path)
     assert settings.news.minimum_article_words > 0
     assert any(feed.enabled for feed in feeds.feeds)
+    assert production.generate_audio is False
 
 
 def test_invalid_numeric_boundary_fails(tmp_path: Path) -> None:

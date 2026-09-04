@@ -75,6 +75,7 @@ class AssetSettings(BaseModel):
 
 
 class ProductionSettings(BaseModel):
+    generate_audio: bool = True
     tts: TTSSettings
     audio: AudioSettings
     assets: AssetSettings
