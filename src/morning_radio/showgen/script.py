@@ -20,7 +20,6 @@ DEFAULT_WPM = 155
 SCRIPT_DURATION_TOLERANCE = 0.2
 MIN_PAUSE_MS = 100
 MAX_PAUSE_MS = 5000
-HEADLINE_PREVIEW_LIMIT = 4
 INTERNAL_EDITORIAL_LANGUAGE = (
     "added because",
     "configured editorial profile",
@@ -107,10 +106,8 @@ def write_script(
         f"Good morning. This is your personal morning radio for {rundown.show_date.strftime('%B %-d, %Y')}."
     )
     if profile.show_format.headline_open:
-        headline_titles = [clean_spoken_copy(item.working_headline) for item in dossiers[:HEADLINE_PREVIEW_LIMIT]]
-        if len(dossiers) > HEADLINE_PREVIEW_LIMIT:
-            headline_titles.append("a few other stories worth watching")
-        lines.append("Ahead this morning: " + join_for_radio(headline_titles) + ".")
+        story_word = "story" if len(dossiers) == 1 else "stories"
+        lines.append(f"I've got {len(dossiers)} {story_word} for you this morning.")
         lines.append("[PAUSE: 500]")
     story_index = 0
     for segment in rundown.segments:
@@ -230,8 +227,7 @@ def uncertainty_sentence(uncertainties: list[str]) -> str | None:
 def watch_list_sentence(dossiers: list[StoryDossier]) -> str:
     if len(dossiers) <= 1:
         return "I'll keep an eye on how this develops."
-    watch = join_for_radio([clean_spoken_copy(item.working_headline) for item in dossiers[:3]])
-    return f"I'll keep an eye on {watch} as the day develops."
+    return "I'll keep an eye on how these stories develop through the day."
 
 
 def join_for_radio(items: list[str]) -> str:

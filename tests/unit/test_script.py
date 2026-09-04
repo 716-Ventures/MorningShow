@@ -179,13 +179,13 @@ def test_fallback_script_uses_radio_copy_instead_of_dossier_labels(tmp_path) -> 
 
     script = write_script(profile(), rundown(), [ugly_dossier], tmp_path, FailingScriptLLM())
 
-    assert "Ahead this morning:" in script
+    assert "I've got 1 story for you this morning." in script
     assert "What is new today:" not in script
     assert "Why it matters:" not in script
     assert "One caution:" not in script
     assert "Single-source story" not in script
     assert "Published" not in script
-    assert script.count("UN votes to adopt new world map to reflect Africa's true size") == 2
+    assert script.count("UN votes to adopt new world map to reflect Africa's true size") == 1
     assert "The UN General Assembly has voted to replace the traditional world map." in script
 
 
