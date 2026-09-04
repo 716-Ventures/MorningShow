@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from morning_radio.artifacts.io import atomic_write_text
+from morning_radio.artifacts.io import atomic_write_json, atomic_write_text
 from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
 from morning_radio.llm.prompts import SCRIPT_SYSTEM
 from morning_radio.models import EditorialProfile, Rundown, StoryDossier
@@ -33,7 +33,7 @@ def write_script(
     run_dir: Path,
     llm: LLMClient | None = None,
 ) -> str:
-    if llm is not None:
+    if llm is not None and not has_upstream_model_fallback(run_dir, llm):
         try:
             script = llm.generate_text(
                 SCRIPT_SYSTEM,
@@ -52,9 +52,15 @@ def write_script(
             script = adjust_script_duration_if_needed(script, rundown, llm)
             atomic_write_text(run_dir / "script-draft.md", script)
             return script
-        except (LLMError, ScriptError):
-            if not allows_fixture_fallback(llm):
-                raise
+        except (LLMError, ScriptError) as exc:
+            atomic_write_json(
+                run_dir / "logs" / "script-fallback.json",
+                {
+                    "model": llm.model,
+                    "reason": str(exc),
+                    "fixture_fallback": allows_fixture_fallback(llm),
+                },
+            )
     dossier_by_id = {item.cluster_id: item for item in dossiers}
     lines = ["[MUSIC: OPENING]", "[HOST]"]
     lines.append(
@@ -87,6 +93,23 @@ def write_script(
     validate_script(script)
     atomic_write_text(run_dir / "script-draft.md", script)
     return script
+
+
+def has_upstream_model_fallback(run_dir: Path, llm: LLMClient) -> bool:
+    if allows_fixture_fallback(llm):
+        return False
+    logs_dir = run_dir / "logs"
+    if any(
+        (logs_dir / filename).exists()
+        for filename in (
+            "scoring-fallback.json",
+            "rundown-fallback.json",
+            "verification-fallback.json",
+        )
+    ):
+        return True
+    dossier_dir = run_dir / "dossiers"
+    return dossier_dir.exists() and any(dossier_dir.glob("*-fallback.json"))
 
 
 def validate_script(script: str) -> None:
