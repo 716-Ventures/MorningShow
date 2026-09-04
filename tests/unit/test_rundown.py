@@ -67,6 +67,16 @@ class FailingRundownLLM:
         raise LLMInvalidResponseError("missing rundown wrapper")
 
 
+class ExplodingRundownLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs):
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise AssertionError("planning LLM should be skipped after upstream fallback")
+
+
 def profile() -> EditorialProfile:
     now = datetime(2026, 8, 15, tzinfo=UTC)
     return EditorialProfile(
@@ -174,3 +184,21 @@ def test_recoverable_rundown_model_error_uses_fallback_with_diagnostic(
     diagnostic = (tmp_path / "logs" / "rundown-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "missing rundown wrapper" in diagnostic
+
+
+def test_upstream_model_fallback_skips_rundown_llm(tmp_path: Path) -> None:
+    fallback_path = tmp_path / "dossiers" / "cluster-001-fallback.json"
+    fallback_path.parent.mkdir()
+    fallback_path.write_text("{}", encoding="utf-8")
+
+    rundown = build_rundown(
+        date(2026, 8, 15),
+        10,
+        profile(),
+        [dossier("cluster-001")],
+        tmp_path,
+        ExplodingRundownLLM(),
+    )
+
+    assert (tmp_path / "rundown.json").exists()
+    assert any(segment.cluster_ids == ["cluster-001"] for segment in rundown.segments)
