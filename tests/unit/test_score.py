@@ -84,6 +84,16 @@ class RecoverableScoringErrorLLM:
         raise LLMError("schema drift")
 
 
+class ExplodingScoringLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs) -> str:
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise AssertionError("LLM should not be called for oversized scoring prompts")
+
+
 def profile(*, negative_preferences: list[str] | None = None) -> EditorialProfile:
     now = datetime(2026, 8, 15, tzinfo=UTC)
     return EditorialProfile(
@@ -122,6 +132,17 @@ def cluster(*, title: str = "OpenAI launches coding agents", fingerprint: str = 
     )
 
 
+def numbered_cluster(index: int) -> Cluster:
+    return Cluster(
+        cluster_id=f"cluster-{index:03d}",
+        canonical_title=f"Large Evidence Story {index}",
+        candidate_ids=[f"candidate-{index:03d}"],
+        source_count=1,
+        topic_hints=["general"],
+        fingerprint=f"fingerprint-{index:03d}",
+    )
+
+
 def extraction() -> ExtractionResult:
     return ExtractionResult(
         candidate_id="candidate-001",
@@ -129,6 +150,17 @@ def extraction() -> ExtractionResult:
         title="OpenAI launches coding agents",
         text="Evidence text about the coding agents.",
         word_count=7,
+        extraction_status="usable",
+    )
+
+
+def numbered_extraction(index: int) -> ExtractionResult:
+    return ExtractionResult(
+        candidate_id=f"candidate-{index:03d}",
+        url=f"https://example.com/story-{index}",
+        title=f"Large Evidence Story {index}",
+        text="Large evidence sentence. " * 200,
+        word_count=600,
         extraction_status="usable",
     )
 
@@ -200,3 +232,18 @@ def test_scoring_recoverable_model_error_uses_fallback_with_diagnostic(tmp_path:
     diagnostic = (tmp_path / "logs" / "scoring-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "schema drift" in diagnostic
+
+
+def test_oversized_scoring_prompt_skips_llm_with_diagnostic(tmp_path: Path) -> None:
+    scores = score_stories(
+        [numbered_cluster(index) for index in range(80)],
+        profile(),
+        tmp_path,
+        ExplodingScoringLLM(),
+        extractions=[numbered_extraction(index) for index in range(80)],
+    )
+
+    assert len(scores) == 80
+    diagnostic = (tmp_path / "logs" / "scoring-fallback.json").read_text(encoding="utf-8")
+    assert "Scoring prompt exceeded" in diagnostic
+    assert "input_character_count" in diagnostic

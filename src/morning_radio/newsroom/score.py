@@ -18,6 +18,8 @@ from morning_radio.models import (
     StoryScore,
 )
 
+MAX_LLM_SCORING_PROMPT_CHARS = 60_000
+
 
 def score_stories(
     clusters: list[Cluster],
@@ -33,40 +35,76 @@ def score_stories(
     history = load_story_history(db_path, clusters)
     extraction_payload = build_extraction_payload(clusters, extractions or [])
     if llm is not None:
-        try:
-            response = llm.generate_structured(
-                SCORING_SYSTEM,
-                json.dumps(
-                    {
-                        "profile": profile.model_dump(mode="json"),
-                        "editorial_memory": editorial_memory,
-                        "clusters": [item.model_dump(mode="json") for item in clusters],
-                        "extraction_evidence": extraction_payload,
-                        "story_history": history,
-                        "required_cluster_ids": [item.cluster_id for item in clusters],
-                    },
-                    ensure_ascii=False,
-                ),
-                StoryScoresResponse,
-                stage="scoring",
-                prompt_type="story_scores",
-            )
-            expected = {item.cluster_id for item in clusters}
-            received = {item.cluster_id for item in response.scores}
-            if expected <= received:
-                return _persist_scores(
-                    apply_score_modifiers(response.scores, clusters, profile, history),
-                    run_dir,
-                )
-        except (LLMError, ValidationError) as exc:
+        scoring_prompt = json.dumps(
+            {
+                "profile": profile.model_dump(mode="json"),
+                "editorial_memory": editorial_memory,
+                "clusters": [item.model_dump(mode="json") for item in clusters],
+                "extraction_evidence": extraction_payload,
+                "story_history": history,
+                "required_cluster_ids": [item.cluster_id for item in clusters],
+            },
+            ensure_ascii=False,
+        )
+        if len(scoring_prompt) > MAX_LLM_SCORING_PROMPT_CHARS:
             atomic_write_json(
                 run_dir / "logs" / "scoring-fallback.json",
                 {
                     "model": llm.model,
-                    "reason": str(exc),
+                    "reason": (
+                        "Scoring prompt exceeded "
+                        f"{MAX_LLM_SCORING_PROMPT_CHARS} characters."
+                    ),
+                    "input_character_count": len(scoring_prompt),
                     "fixture_fallback": allows_fixture_fallback(llm),
                 },
             )
+        else:
+            return _score_with_llm(scoring_prompt, clusters, profile, history, run_dir, llm)
+    return _score_with_heuristics(clusters, profile, history, run_dir)
+
+
+def _score_with_llm(
+    scoring_prompt: str,
+    clusters: list[Cluster],
+    profile: EditorialProfile,
+    history: dict[str, dict[str, str | int | None]],
+    run_dir: Path,
+    llm: LLMClient,
+) -> list[StoryScore]:
+    try:
+        response = llm.generate_structured(
+            SCORING_SYSTEM,
+            scoring_prompt,
+            StoryScoresResponse,
+            stage="scoring",
+            prompt_type="story_scores",
+        )
+        expected = {item.cluster_id for item in clusters}
+        received = {item.cluster_id for item in response.scores}
+        if expected <= received:
+            return _persist_scores(
+                apply_score_modifiers(response.scores, clusters, profile, history),
+                run_dir,
+            )
+    except (LLMError, ValidationError) as exc:
+        atomic_write_json(
+            run_dir / "logs" / "scoring-fallback.json",
+            {
+                "model": llm.model,
+                "reason": str(exc),
+                "fixture_fallback": allows_fixture_fallback(llm),
+            },
+        )
+    return _score_with_heuristics(clusters, profile, history, run_dir)
+
+
+def _score_with_heuristics(
+    clusters: list[Cluster],
+    profile: EditorialProfile,
+    history: dict[str, dict[str, str | int | None]],
+    run_dir: Path,
+) -> list[StoryScore]:
     interest_terms = {
         term.lower(): item
         for item in profile.interests
