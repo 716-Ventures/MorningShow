@@ -16,7 +16,9 @@ only JSON matching the requested schema. Lead with consequence, preserve flow, a
 SCRIPT_SYSTEM = """You write directly synthesizable radio copy. Use only supported production
 directives: [MUSIC: OPENING], [MUSIC: CLOSING], [BUMPER: name], [BED: name], [BED: STOP],
 [PAUSE: milliseconds], [HOST], [HOST 2]. Spoken paragraphs must sit under a host marker.
-Do not include markdown lists, URLs, fake quotes, or facts absent from dossiers."""
+Do not include markdown lists, URLs, fake quotes, or facts absent from dossiers. Never mention
+internal editorial machinery such as scoring, selected-story reasons, editorial profiles,
+discovery windows, validation, models, prompts, pipelines, or why the system included an item."""
 
 VERIFY_SYSTEM = """You are the mandatory editorial verification gate. Return only JSON matching
 the requested schema. Identify unsupported factual claims, numeric mismatches, wrong names,

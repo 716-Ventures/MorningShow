@@ -20,6 +20,29 @@ DEFAULT_WPM = 155
 SCRIPT_DURATION_TOLERANCE = 0.2
 MIN_PAUSE_MS = 100
 MAX_PAUSE_MS = 5000
+INTERNAL_EDITORIAL_LANGUAGE = (
+    "added because",
+    "configured editorial profile",
+    "current discovery window",
+    "discovery window",
+    "editorial profile",
+    "final score",
+    "included because",
+    "matched interests",
+    "model output",
+    "pipeline",
+    "prompt",
+    "relevance score",
+    "score of",
+    "scored",
+    "scoring",
+    "selected story",
+    "validation",
+    "why it was selected",
+    "why this story was added",
+    "why this was added",
+    "why this was selected",
+)
 
 
 class ScriptError(RuntimeError):
@@ -126,6 +149,14 @@ def validate_script(script: str) -> None:
             raise ScriptError("Spoken copy may not contain markdown lists.")
         if not current_host:
             raise ScriptError(f"Spoken paragraph is not under a host marker: {line[:40]}")
+        validate_listener_facing_copy(line)
+
+
+def validate_listener_facing_copy(line: str) -> None:
+    lowered = line.casefold()
+    for phrase in INTERNAL_EDITORIAL_LANGUAGE:
+        if phrase in lowered:
+            raise ScriptError(f"Spoken copy may not mention internal editorial machinery: {phrase}")
 
 
 def parse_directive(line: str) -> str | None:

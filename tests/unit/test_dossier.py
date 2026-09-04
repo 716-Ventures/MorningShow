@@ -240,6 +240,17 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
     assert len(dossiers) == 2
     assert dossiers[0].facts[0].claim == "Fallback source sentence."
     assert dossiers[1].facts[0].claim == "Second source sentence."
+    spoken_context = " ".join(
+        [
+            dossiers[0].what_is_new_today,
+            dossiers[0].why_it_matters,
+            dossiers[1].what_is_new_today,
+            dossiers[1].why_it_matters,
+        ]
+    ).casefold()
+    assert "discovery window" not in spoken_context
+    assert "scored" not in spoken_context
+    assert "editorial profile" not in spoken_context
     diagnostic = (tmp_path / "dossiers" / "cluster-001-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "missing dossier wrapper" in diagnostic

@@ -63,6 +63,13 @@ def test_spoken_list_fails() -> None:
         validate_script("[HOST]\n- Bullet copy\n")
 
 
+def test_internal_editorial_language_fails() -> None:
+    with pytest.raises(ScriptError):
+        validate_script(
+            "[HOST]\nThis story was included because it scored highly against your editorial profile.\n"
+        )
+
+
 def test_invalid_pause_argument_fails() -> None:
     with pytest.raises(ScriptError):
         validate_script("[HOST]\nHello.\n\n[PAUSE: nope]\n")
