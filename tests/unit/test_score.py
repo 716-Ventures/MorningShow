@@ -74,6 +74,16 @@ class FixtureFallbackLLM:
         raise LLMError("fixture model unavailable")
 
 
+class RecoverableScoringErrorLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs) -> str:
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise LLMError("schema drift")
+
+
 def profile(*, negative_preferences: list[str] | None = None) -> EditorialProfile:
     now = datetime(2026, 8, 15, tzinfo=UTC)
     return EditorialProfile(
@@ -180,3 +190,13 @@ def test_scoring_expected_fixture_error_uses_explicit_fallback(tmp_path: Path) -
 
     assert scores
     assert scores[0].reason.startswith("Matched")
+
+
+def test_scoring_recoverable_model_error_uses_fallback_with_diagnostic(tmp_path: Path) -> None:
+    scores = score_stories([cluster()], profile(), tmp_path, RecoverableScoringErrorLLM())
+
+    assert scores
+    assert scores[0].reason.startswith("Matched")
+    diagnostic = (tmp_path / "logs" / "scoring-fallback.json").read_text(encoding="utf-8")
+    assert "small-local-model" in diagnostic
+    assert "schema drift" in diagnostic

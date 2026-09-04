@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from morning_radio.artifacts.io import atomic_write_json
-from morning_radio.llm.client import LLMClient
+from morning_radio.llm.client import LLMClient, LLMError
 from morning_radio.llm.schemas import SameEventDecision
 from morning_radio.models import CandidateStory, Cluster, ExtractionResult
 
@@ -59,15 +59,16 @@ def cluster_stories(
 
     for left_index, left in enumerate(ordered_candidates):
         for right in ordered_candidates[left_index + 1 :]:
-            decision, similarity = should_merge(left, right, llm)
-            decisions.append(
-                {
-                    "left": left.candidate_id,
-                    "right": right.candidate_id,
-                    "same_event": decision,
-                    "similarity": round(similarity, 3),
-                }
-            )
+            decision, similarity, error = should_merge(left, right, llm)
+            decision_log: dict[str, str | bool | float] = {
+                "left": left.candidate_id,
+                "right": right.candidate_id,
+                "same_event": decision,
+                "similarity": round(similarity, 3),
+            }
+            if error is not None:
+                decision_log["error"] = error
+            decisions.append(decision_log)
             if decision:
                 union_find.union(left.candidate_id, right.candidate_id)
 
@@ -137,33 +138,36 @@ def token_similarity(left: CandidateStory, right: CandidateStory) -> float:
 
 def should_merge(
     left: CandidateStory, right: CandidateStory, llm: LLMClient | None
-) -> tuple[bool, float]:
+) -> tuple[bool, float, str | None]:
     left_title = normalize_title(left.title)
     right_title = normalize_title(right.title)
     similarity = token_similarity(left, right)
     if left_title == right_title:
-        return True, 1.0
+        return True, 1.0, None
     if similarity >= HIGH_CONFIDENCE_SIMILARITY and within_time_block(left, right):
-        return True, similarity
+        return True, similarity, None
     if similarity < AMBIGUOUS_SIMILARITY or not within_time_block(left, right):
-        return False, similarity
+        return False, similarity, None
     if llm is None:
-        return False, similarity
-    decision = llm.generate_structured(
-        "Decide whether two news headlines describe the same real-world event.",
-        json.dumps(
-            {
-                "left": left.model_dump(mode="json"),
-                "right": right.model_dump(mode="json"),
-                "similarity": similarity,
-            },
-            ensure_ascii=False,
-        ),
-        SameEventDecision,
-        stage="clustering",
-        prompt_type="same_event",
-    )
-    return decision.same_event, similarity
+        return False, similarity, None
+    try:
+        decision = llm.generate_structured(
+            "Decide whether two news headlines describe the same real-world event.",
+            json.dumps(
+                {
+                    "left": left.model_dump(mode="json"),
+                    "right": right.model_dump(mode="json"),
+                    "similarity": similarity,
+                },
+                ensure_ascii=False,
+            ),
+            SameEventDecision,
+            stage="clustering",
+            prompt_type="same_event",
+        )
+    except LLMError as exc:
+        return False, similarity, f"LLM adjudication failed: {exc}"
+    return decision.same_event, similarity, None
 
 
 def within_time_block(left: CandidateStory, right: CandidateStory) -> bool:

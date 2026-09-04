@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from morning_radio.llm.client import LLMInvalidResponseError
 from morning_radio.models import CandidateStory, ExtractionResult
 from morning_radio.newsroom.cluster import cluster_stories
 
@@ -25,6 +26,20 @@ class SameEventLLM:
             canonical_title="Adjudicated title",
             reason="fixture",
         )
+
+
+class FailingSameEventLLM:
+    model = "test"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_text(self, *args, **kwargs):
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        self.calls += 1
+        raise LLMInvalidResponseError("missing same_event")
 
 
 def candidate(candidate_id: str, title: str, *, published_at: datetime | None = None) -> CandidateStory:
@@ -122,3 +137,19 @@ def test_ambiguous_llm_rejection_stays_separate(tmp_path: Path) -> None:
     clusters = cluster_stories(candidates, [extraction("a"), extraction("b")], tmp_path, llm)
     assert llm.calls == 1
     assert len(clusters) == 2
+
+
+def test_ambiguous_llm_failure_stays_separate_with_diagnostic(tmp_path: Path) -> None:
+    llm = FailingSameEventLLM()
+    candidates = [
+        candidate("a", "Acme merger approved by regulators"),
+        candidate("b", "Regulators approve Acme deal"),
+    ]
+
+    clusters = cluster_stories(candidates, [extraction("a"), extraction("b")], tmp_path, llm)
+
+    assert llm.calls == 1
+    assert len(clusters) == 2
+    decisions = (tmp_path / "logs" / "cluster-decisions.json").read_text(encoding="utf-8")
+    assert "LLM adjudication failed" in decisions
+    assert "missing same_event" in decisions
