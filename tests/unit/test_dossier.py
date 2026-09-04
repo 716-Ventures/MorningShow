@@ -18,10 +18,14 @@ from morning_radio.newsroom.dossier import _valid_source_ids, build_dossiers
 class FailingDossierLLM:
     model = "small-local-model"
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def generate_text(self, *args, **kwargs) -> str:
         return ""
 
     def generate_structured(self, *args, **kwargs):
+        self.calls += 1
         raise LLMInvalidResponseError("missing dossier wrapper")
 
 
@@ -180,6 +184,7 @@ def test_unsafe_dossier_backfills_from_unused_high_score_story(tmp_path) -> None
 
 
 def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> None:
+    llm = FailingDossierLLM()
     clusters = [
         Cluster(
             cluster_id="cluster-001",
@@ -187,6 +192,13 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             candidate_ids=["candidate-001"],
             source_count=1,
             fingerprint="fallback",
+        ),
+        Cluster(
+            cluster_id="cluster-002",
+            canonical_title="Second Fallback Story",
+            candidate_ids=["candidate-002"],
+            source_count=1,
+            fingerprint="second-fallback",
         )
     ]
     extractions = [
@@ -197,6 +209,14 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             text="Fallback source sentence. More source text follows.",
             word_count=8,
             extraction_status="usable",
+        ),
+        ExtractionResult(
+            candidate_id="candidate-002",
+            url="https://example.com/second-story",
+            title="Second Fallback Story",
+            text="Second source sentence. More source text follows.",
+            word_count=8,
+            extraction_status="usable",
         )
     ]
     selected = [
@@ -205,13 +225,21 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             reason="selected",
             estimated_seconds=60,
             score=90,
+        ),
+        SelectedStory(
+            cluster_id="cluster-002",
+            reason="selected",
+            estimated_seconds=60,
+            score=85,
         )
     ]
 
-    dossiers = build_dossiers(selected, clusters, extractions, tmp_path, FailingDossierLLM())
+    dossiers = build_dossiers(selected, clusters, extractions, tmp_path, llm)
 
-    assert len(dossiers) == 1
+    assert llm.calls == 1
+    assert len(dossiers) == 2
     assert dossiers[0].facts[0].claim == "Fallback source sentence."
+    assert dossiers[1].facts[0].claim == "Second source sentence."
     diagnostic = (tmp_path / "dossiers" / "cluster-001-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "missing dossier wrapper" in diagnostic

@@ -36,6 +36,7 @@ def build_dossiers(
     queue = [*primary_stories, *backfill_stories]
     attempted: set[str] = set()
     target_count = len(primary_stories)
+    use_llm = llm is not None
     for story in queue:
         if len(dossiers) >= target_count:
             break
@@ -49,7 +50,7 @@ def build_dossiers(
             if candidate_id in extraction_by_id
             and extraction_by_id[candidate_id].extraction_status == "usable"
         ]
-        if llm is not None:
+        if llm is not None and use_llm:
             try:
                 response = llm.generate_structured(
                     DOSSIER_SYSTEM,
@@ -98,6 +99,7 @@ def build_dossiers(
                         "fixture_fallback": allows_fixture_fallback(llm),
                     },
                 )
+                use_llm = False
         facts = [
             DossierFact(
                 claim=_first_sentence(source.text) or cluster.canonical_title,
