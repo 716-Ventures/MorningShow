@@ -19,6 +19,7 @@ dependencies = [
 tts = [
   "kokoro>=0.9.4",
   "numpy>=1.26",
+  "pip>=26.0",
   "soundfile>=0.12.1",
 ]
 
