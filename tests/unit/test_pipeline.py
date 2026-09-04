@@ -8,6 +8,7 @@ from pydantic import HttpUrl
 
 from morning_radio import db, pipeline
 from morning_radio.artifacts.runs import create_run
+from morning_radio.audio.production import SpeechItem
 from morning_radio.models import (
     AudioMetadata,
     CandidateStory,
@@ -137,6 +138,7 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     )
     synthesized_scripts: list[str] = []
     planned_scripts: list[str] = []
+    mix_kwargs: dict[str, object] = {}
     order: list[str] = []
 
     monkeypatch.setattr(pipeline, "discover_candidates", lambda *args: [candidate])
@@ -172,20 +174,31 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
             )
         ]
 
-    def build_text_plan(script: str, *args) -> list[dict[str, str | None]]:
+    def build_text_plan(script: str, *args) -> list[SpeechItem]:
         order.append("plan")
         planned_scripts.append(script)
-        return [{"type": "speech", "path": None}]
+        return [SpeechItem(text="Draft text.", host="HOST")]
 
     def attach_audio(plan, audio):
         order.append("attach")
-        return [{"type": "speech", "path": "raw-audio/001-host.wav"}]
+        return [
+            SpeechItem(
+                text="Draft text.",
+                host="HOST",
+                path=context.run_dir / "raw-audio" / "001-host.wav",
+                duration_seconds=2.0,
+            )
+        ]
+
+    def mix(plan, production, run_dir, **kwargs):
+        mix_kwargs.update(kwargs)
+        return context.run_dir / "episode.mp3"
 
     monkeypatch.setattr(pipeline, "synthesize_script", synthesize)
     monkeypatch.setattr(pipeline, "build_text_production_plan", build_text_plan)
     monkeypatch.setattr(pipeline, "attach_audio_to_plan", attach_audio)
     monkeypatch.setattr(pipeline, "write_production_plan", lambda *args: None)
-    monkeypatch.setattr(pipeline, "mix_and_master", lambda *args, **kwargs: context.run_dir / "episode.mp3")
+    monkeypatch.setattr(pipeline, "mix_and_master", mix)
     monkeypatch.setattr(
         pipeline,
         "write_sources_page",
@@ -207,3 +220,4 @@ def test_pipeline_synthesizes_verified_final_script(monkeypatch, tmp_path: Path)
     assert synthesized_scripts == ["[HOST]\nCorrected final text.\n"]
     assert planned_scripts == ["[HOST]\nCorrected final text.\n"]
     assert order[:3] == ["plan", "synthesize", "attach"]
+    assert mix_kwargs["planned_seconds"] == 2

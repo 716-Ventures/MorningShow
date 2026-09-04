@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal, cast
@@ -12,6 +13,9 @@ from morning_radio.artifacts.runs import RunContext, create_run
 from morning_radio.artifacts.sources import write_sources_page
 from morning_radio.audio.master import mix_and_master
 from morning_radio.audio.production import (
+    PauseItem,
+    ProductionItem,
+    SpeechItem,
     attach_audio_to_plan,
     build_text_production_plan,
     synthesize_script,
@@ -193,7 +197,9 @@ def _run_pipeline(
         plan,
         production_settings,
         context.run_dir,
-        planned_seconds=None if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1" else rundown.planned_seconds,
+        planned_seconds=None
+        if os.environ.get("MORNING_RADIO_FIXTURE_RUN") == "1"
+        else production_plan_seconds(plan),
         episode_title=f"Personal Morning Radio {requested_date.isoformat()}",
         episode_date=requested_date.isoformat(),
     )
@@ -248,6 +254,16 @@ def stage_action(stage: str) -> str:
         StageStatus.MIXING.value: "Inspect mix/ FFmpeg command logs and stderr files.",
     }
     return actions.get(stage, "Inspect run.json and logs/run.log for the failed stage.")
+
+
+def production_plan_seconds(plan: Sequence[ProductionItem]) -> int:
+    total = 0.0
+    for item in plan:
+        if isinstance(item, SpeechItem) and item.duration_seconds is not None:
+            total += item.duration_seconds
+        elif isinstance(item, PauseItem):
+            total += item.milliseconds / 1000
+    return max(1, round(total))
 
 
 def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list[ExtractionResult]]:
