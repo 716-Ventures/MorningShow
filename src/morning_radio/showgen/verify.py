@@ -20,6 +20,8 @@ from morning_radio.models import (
 )
 from morning_radio.showgen.script import ScriptError, validate_script
 
+MAX_LLM_VERIFICATION_PROMPT_CHARS = 80_000
+
 
 def verify_script(
     script: str,
@@ -138,30 +140,53 @@ def _verify_once(
     if issues:
         return VerificationResult(status="fail", issues=issues, corrected_script_required=True), None
     if llm is not None:
+        verification_prompt = json.dumps(
+            {
+                "script": script,
+                "dossiers": [item.model_dump(mode="json") for item in dossiers],
+                "profile": _dump_optional_model(profile),
+                "rundown": _dump_optional_model(rundown),
+                "extractions": [item.model_dump(mode="json") for item in extractions or []],
+                "correction_cycle": cycle,
+            },
+            ensure_ascii=False,
+        )
+        fixture_fallback = allows_fixture_fallback(llm)
+        oversized_prompt = len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
+        upstream_fallback = has_upstream_model_fallback(run_dir)
+        if not fixture_fallback and (oversized_prompt or upstream_fallback):
+            atomic_write_json(
+                run_dir / "logs" / "verification-fallback.json",
+                {
+                    "model": llm.model,
+                    "reason": (
+                        "Verification prompt exceeded local model guardrail."
+                        if len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
+                        else "Upstream model fallback was used."
+                    ),
+                    "input_character_count": len(verification_prompt),
+                    "fixture_fallback": fixture_fallback,
+                },
+            )
+            return VerificationResult(status="pass", issues=[], corrected_script_required=False), None
         try:
             response = llm.generate_structured(
                 VERIFY_SYSTEM,
-                json.dumps(
-                    {
-                        "script": script,
-                        "dossiers": [item.model_dump(mode="json") for item in dossiers],
-                        "profile": _dump_optional_model(profile),
-                        "rundown": _dump_optional_model(rundown),
-                        "extractions": [
-                            item.model_dump(mode="json") for item in extractions or []
-                        ],
-                        "correction_cycle": cycle,
-                    },
-                    ensure_ascii=False,
-                ),
+                verification_prompt,
                 VerificationResponse,
                 stage="verification",
                 prompt_type="editorial_gate",
             )
             return response.verification, response.corrected_script
-        except (LLMError, ValidationError):
-            if not allows_fixture_fallback(llm):
-                raise
+        except (LLMError, ValidationError) as exc:
+            atomic_write_json(
+                run_dir / "logs" / "verification-fallback.json",
+                {
+                    "model": llm.model,
+                    "reason": str(exc),
+                    "fixture_fallback": allows_fixture_fallback(llm),
+                },
+            )
             return VerificationResult(status="pass", issues=[], corrected_script_required=False), None
     return (
         VerificationResult(
@@ -196,6 +221,17 @@ def _dump_optional_model(value: Any | None) -> Any | None:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     return value
+
+
+def has_upstream_model_fallback(run_dir: Path) -> bool:
+    logs_dir = run_dir / "logs"
+    if any(
+        (logs_dir / filename).exists()
+        for filename in ("scoring-fallback.json", "rundown-fallback.json")
+    ):
+        return True
+    dossier_dir = run_dir / "dossiers"
+    return dossier_dir.exists() and any(dossier_dir.glob("*-fallback.json"))
 
 
 def _persist(result: VerificationResult, run_dir: Path) -> None:

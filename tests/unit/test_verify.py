@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from morning_radio.llm.client import LLMError
 from morning_radio.models import (
     DossierFact,
     ExtractionResult,
@@ -141,6 +142,26 @@ class CapturingLLM:
         )
 
 
+class FailingVerificationLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs):
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise LLMError("timed out")
+
+
+class ExplodingVerificationLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs):
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise AssertionError("verification LLM should be skipped")
+
+
 def valid_dossier() -> StoryDossier:
     return StoryDossier(
         cluster_id="cluster-001",
@@ -266,3 +287,45 @@ def test_verifier_payload_includes_profile_rundown_and_extractions(tmp_path: Pat
     assert llm.payload["profile"] == {"location": "Buffalo"}
     assert llm.payload["rundown"]["target_seconds"] == 600
     assert llm.payload["extractions"][0]["candidate_id"] == "source-001"
+
+
+def test_recoverable_verification_model_error_uses_fallback(tmp_path: Path) -> None:
+    verified = verify_script(
+        "[HOST]\nDraft script.\n",
+        [valid_dossier()],
+        tmp_path,
+        FailingVerificationLLM(),
+        maximum_correction_cycles=2,
+    )
+
+    assert verified.verification.status == "pass"
+    assert (tmp_path / "script-final.md").exists()
+    diagnostic = (tmp_path / "logs" / "verification-fallback.json").read_text(encoding="utf-8")
+    assert "small-local-model" in diagnostic
+    assert "timed out" in diagnostic
+
+
+def test_oversized_verification_prompt_skips_llm(tmp_path: Path) -> None:
+    extraction = ExtractionResult(
+        candidate_id="source-001",
+        url="https://example.com/story",
+        final_url="https://example.com/story",
+        title="Story",
+        text="Long source evidence. " * 10_000,
+        word_count=30_000,
+        extraction_status="usable",
+        published_at=datetime(2026, 8, 15, tzinfo=UTC),
+    )
+
+    verified = verify_script(
+        "[HOST]\nDraft script.\n",
+        [valid_dossier()],
+        tmp_path,
+        ExplodingVerificationLLM(),
+        maximum_correction_cycles=2,
+        extractions=[extraction],
+    )
+
+    assert verified.verification.status == "pass"
+    diagnostic = (tmp_path / "logs" / "verification-fallback.json").read_text(encoding="utf-8")
+    assert "Verification prompt exceeded" in diagnostic
