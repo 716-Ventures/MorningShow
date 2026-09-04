@@ -4,11 +4,13 @@ from pathlib import Path
 
 import pytest
 
+import morning_radio.audio.master as master_module
 from morning_radio.audio.master import (
     AudioMasterError,
     coerce_production_plan,
     escape_concat_path,
     metadata_args,
+    mix_and_master,
     run_command,
     run_probe,
     validate_final_mp3,
@@ -153,6 +155,37 @@ def test_metadata_args_include_episode_fields() -> None:
     assert ("-metadata", "album=Personal Morning Radio") in pairs
     assert ("-metadata", "show=Personal Morning Radio") in pairs
     assert ("-metadata", "date=2026-08-15") in pairs
+
+
+def test_master_command_preserves_configured_audio_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    production = production_settings()
+    commands: list[tuple[str, list[str]]] = []
+
+    def fake_run_command(command: list[str], _run_dir: Path, label: str) -> None:
+        commands.append((label, command))
+        Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(command[-1]).write_bytes(b"audio")
+
+    def fake_probe(_ffprobe: str, episode: Path, _run_dir: Path):
+        episode.write_bytes(b"mp3")
+        return probe("100.0")
+
+    monkeypatch.setattr(master_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    monkeypatch.setattr(master_module, "run_probe", fake_probe)
+
+    mix_and_master(
+        [{"type": "pause", "milliseconds": 1000}],
+        production,
+        tmp_path,
+        planned_seconds=100,
+    )
+
+    master_command = dict(commands)["master"]
+    assert master_command[master_command.index("-ar") + 1] == "44100"
+    assert master_command[master_command.index("-ac") + 1] == "2"
 
 
 def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:
