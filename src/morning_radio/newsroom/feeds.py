@@ -97,11 +97,17 @@ def discover_candidates(
             continue
         feed_candidates = parse_feed_candidates(feed, parsed, now, newest_allowed)
         per_feed_candidates[feed.id] = feed_candidates
-        log_line(run_dir, f"stage=discover feed={feed.id} status=ok candidates={len(feed_candidates)}")
+        log_line(
+            run_dir, f"stage=discover feed={feed.id} status=ok candidates={len(feed_candidates)}"
+        )
 
-    candidates = fair_cap_candidates(feed_order, per_feed_candidates, app_settings.news.max_candidates)
+    candidates = fair_cap_candidates(
+        feed_order, per_feed_candidates, app_settings.news.max_candidates
+    )
     if not candidates:
-        raise DiscoveryError(f"Zero candidates retrieved from enabled feeds ({failures} feed failures).")
+        raise DiscoveryError(
+            f"Zero candidates retrieved from enabled feeds ({failures} feed failures)."
+        )
     atomic_write_jsonl(
         run_dir / "candidates.jsonl",
         [candidate.model_dump(mode="json") for candidate in candidates],
@@ -164,6 +170,7 @@ def parse_feed_candidates(
                 feed_summary=getattr(entry, "summary", None),
                 category_hints=feed.category_hints,
                 geography_hints=feed.geography_hints,
+                interest_hints=feed.interest_hints,
             )
         )
     return sorted(

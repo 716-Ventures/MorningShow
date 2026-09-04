@@ -13,6 +13,7 @@ from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallbac
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import StoryScoresResponse
 from morning_radio.models import (
+    CandidateStory,
     Cluster,
     EditorialProfile,
     ExtractionResult,
@@ -32,17 +33,20 @@ def score_stories(
     llm: LLMClient | None = None,
     *,
     extractions: list[ExtractionResult] | None = None,
+    candidates: list[CandidateStory] | None = None,
     editorial_memory_path: Path | None = None,
     db_path: Path | None = None,
 ) -> list[StoryScore]:
     editorial_memory = load_editorial_memory(editorial_memory_path)
     history = load_story_history(db_path, clusters)
     extraction_payload = build_extraction_payload(clusters, extractions or [])
+    declared_matches = build_declared_interest_matches(clusters, candidates or [], profile)
     heuristic_scores = _build_heuristic_scores(
         clusters,
         profile,
         history,
         extraction_payload,
+        declared_matches,
     )
     if llm is not None:
         heuristic_by_id = {score.cluster_id: score for score in heuristic_scores}
@@ -76,8 +80,7 @@ def score_stories(
                 {
                     "model": llm.model,
                     "reason": (
-                        "Scoring prompt exceeded "
-                        f"{MAX_LLM_SCORING_PROMPT_CHARS} characters."
+                        f"Scoring prompt exceeded {MAX_LLM_SCORING_PROMPT_CHARS} characters."
                     ),
                     "input_character_count": len(scoring_prompt),
                     "fixture_fallback": allows_fixture_fallback(llm),
@@ -116,15 +119,24 @@ def _score_with_llm(
         expected = {item.cluster_id for item in requested_clusters}
         received = {item.cluster_id for item in response.scores}
         if expected <= received:
+            heuristic_by_id = {score.cluster_id: score for score in fallback_scores}
+            normalized_scores = [
+                preserve_deterministic_matches(score, heuristic_by_id[score.cluster_id])
+                for score in response.scores
+                if score.cluster_id in expected
+            ]
             model_scores = apply_score_modifiers(
-                [score for score in response.scores if score.cluster_id in expected],
+                normalized_scores,
                 requested_clusters,
                 profile,
                 history,
             )
             model_ids = {score.cluster_id for score in model_scores}
             return _persist_scores(
-                [*model_scores, *(score for score in fallback_scores if score.cluster_id not in model_ids)],
+                [
+                    *model_scores,
+                    *(score for score in fallback_scores if score.cluster_id not in model_ids),
+                ],
                 run_dir,
             )
     except (LLMError, ValidationError) as exc:
@@ -147,7 +159,7 @@ def _score_with_heuristics(
     extraction_payload: dict[str, list[dict[str, str | int | None]]],
 ) -> list[StoryScore]:
     return _persist_scores(
-        _build_heuristic_scores(clusters, profile, history, extraction_payload),
+        _build_heuristic_scores(clusters, profile, history, extraction_payload, {}),
         run_dir,
     )
 
@@ -157,16 +169,20 @@ def _build_heuristic_scores(
     profile: EditorialProfile,
     history: dict[str, dict[str, str | int | None]],
     extraction_payload: dict[str, list[dict[str, str | int | None]]],
+    declared_matches: dict[str, list[Interest]],
 ) -> list[StoryScore]:
     interest_terms = build_interest_terms(profile)
     negative_terms = [item.casefold() for item in profile.negative_preferences]
     scores: list[StoryScore] = []
     for cluster in clusters:
         title_haystack, context_haystack = cluster_haystacks(cluster, extraction_payload)
-        matched_interests = matched_profile_interests(
-            interest_terms,
-            title_haystack,
-            context_haystack,
+        matched_interests = merge_interest_matches(
+            declared_matches.get(cluster.cluster_id, []),
+            matched_profile_interests(
+                interest_terms,
+                title_haystack,
+                context_haystack,
+            ),
         )
         matched = [interest.name for interest in matched_interests]
         negative = [
@@ -179,11 +195,24 @@ def _build_heuristic_scores(
         importance = min(100, 35 + cluster.source_count * 12)
         if any(hint in {"world", "us", "general"} for hint in cluster.topic_hints):
             importance += 15
-        locality = 80 if any("buffalo" in hint.lower() or "western" in hint.lower() for hint in cluster.topic_hints) else 20
+        locality = (
+            80
+            if any(
+                "buffalo" in hint.lower() or "western" in hint.lower()
+                for hint in cluster.topic_hints
+            )
+            else 20
+        )
         freshness = 75 if cluster.latest_published_at else 50
         novelty = 70
         confidence = min(95, 50 + cluster.source_count * 15)
-        final = round((relevance * 0.35) + (importance * 0.3) + (freshness * 0.15) + (locality * 0.1) + (novelty * 0.1))
+        final = round(
+            (relevance * 0.35)
+            + (importance * 0.3)
+            + (freshness * 0.15)
+            + (locality * 0.1)
+            + (novelty * 0.1)
+        )
         final = max(0, min(100, final))
         scores.append(
             StoryScore(
@@ -240,6 +269,53 @@ def matched_profile_interests(
             matched.append(interest)
             seen.add(key)
     return matched
+
+
+def build_declared_interest_matches(
+    clusters: list[Cluster],
+    candidates: list[CandidateStory],
+    profile: EditorialProfile,
+) -> dict[str, list[Interest]]:
+    candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    interest_by_name = {interest.name.casefold(): interest for interest in profile.interests}
+    result: dict[str, list[Interest]] = {}
+    for cluster in clusters:
+        declared_names = {
+            hint.casefold()
+            for candidate_id in cluster.candidate_ids
+            if (candidate := candidate_by_id.get(candidate_id)) is not None
+            for hint in candidate.interest_hints
+        }
+        result[cluster.cluster_id] = [
+            interest for name, interest in interest_by_name.items() if name in declared_names
+        ]
+    return result
+
+
+def merge_interest_matches(*groups: list[Interest]) -> list[Interest]:
+    merged: list[Interest] = []
+    seen: set[str] = set()
+    for group in groups:
+        for interest in group:
+            key = interest.name.casefold()
+            if key not in seen:
+                merged.append(interest)
+                seen.add(key)
+    return merged
+
+
+def preserve_deterministic_matches(
+    model_score: StoryScore, heuristic_score: StoryScore
+) -> StoryScore:
+    negative_matches = list(
+        dict.fromkeys([*heuristic_score.negative_matches, *model_score.negative_matches])
+    )
+    return model_score.model_copy(
+        update={
+            "matched_interests": heuristic_score.matched_interests,
+            "negative_matches": negative_matches,
+        }
+    )
 
 
 def expand_interest_terms(name: str, subtopics: list[str]) -> set[str]:
@@ -317,7 +393,9 @@ def load_editorial_memory(path: Path | None) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def load_story_history(db_path: Path | None, clusters: list[Cluster]) -> dict[str, dict[str, str | int | None]]:
+def load_story_history(
+    db_path: Path | None, clusters: list[Cluster]
+) -> dict[str, dict[str, str | int | None]]:
     if db_path is None or not db_path.exists():
         return {}
     rows = db.read_story_history(db_path, [cluster.fingerprint for cluster in clusters])
@@ -392,7 +470,11 @@ def apply_score_modifiers(
         for modifier in modifiers:
             final += modifier.delta
         final = max(0, min(100, final))
-        novelty = min(score.novelty, 25) if any(item.name == "repeat_story" for item in modifiers) else score.novelty
+        novelty = (
+            min(score.novelty, 25)
+            if any(item.name == "repeat_story" for item in modifiers)
+            else score.novelty
+        )
         adjusted.append(
             score.model_copy(
                 update={

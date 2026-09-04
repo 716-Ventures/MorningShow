@@ -9,6 +9,7 @@ import pytest
 from morning_radio import db
 from morning_radio.llm.client import LLMError
 from morning_radio.models import (
+    CandidateStory,
     Cluster,
     EditorialProfile,
     EditorialStyle,
@@ -108,7 +109,8 @@ def profile(
         created_at=now,
         updated_at=now,
         location=LocationProfile(home="Buffalo, NY", local_scope="Western New York"),
-        interests=interests or [Interest(name="AI", priority=5, depth="normal", subtopics=["agents"])],
+        interests=interests
+        or [Interest(name="AI", priority=5, depth="normal", subtopics=["agents"])],
         global_news=GlobalNewsProfile(include_major_us=True, include_major_world=True),
         negative_preferences=negative_preferences or [],
         editorial_style=EditorialStyle(
@@ -129,7 +131,9 @@ def profile(
     )
 
 
-def cluster(*, title: str = "OpenAI launches coding agents", fingerprint: str = "fingerprint") -> Cluster:
+def cluster(
+    *, title: str = "OpenAI launches coding agents", fingerprint: str = "fingerprint"
+) -> Cluster:
     return Cluster(
         cluster_id="cluster-001",
         canonical_title=title,
@@ -178,7 +182,9 @@ def test_scoring_payload_includes_memory_evidence_and_history(tmp_path: Path) ->
     memory_path.write_text("Prefer practical developer impact.", encoding="utf-8")
     db_path = tmp_path / "app.db"
     db.initialize(db_path)
-    db.update_story_history(db_path, [("fingerprint", "OpenAI launches coding agents")], "2026-08-14")
+    db.update_story_history(
+        db_path, [("fingerprint", "OpenAI launches coding agents")], "2026-08-14"
+    )
     llm = CapturingScoringLLM()
 
     score_stories(
@@ -312,10 +318,45 @@ def test_bills_interest_does_not_match_generic_nfl_page_boilerplate(tmp_path: Pa
     assert scores[0].matched_interests == []
 
 
+def test_declared_feed_interest_matches_without_interest_words_in_title(tmp_path: Path) -> None:
+    scores = score_stories(
+        [cluster(title="Roster move announced")],
+        profile(interests=[Interest(name="Bills Football", priority=1, depth="normal")]),
+        tmp_path,
+        llm=None,
+        candidates=[
+            CandidateStory(
+                candidate_id="candidate-001",
+                feed_id="buffalo-bills-official",
+                title="Roster move announced",
+                url="https://www.buffalobills.com/news/roster-move",
+                retrieved_at=datetime(2026, 8, 15, tzinfo=UTC),
+                interest_hints=["Bills Football"],
+            )
+        ],
+    )
+
+    assert scores[0].matched_interests == ["Bills Football"]
+
+
+def test_llm_reranking_cannot_erase_deterministic_interest_matches(tmp_path: Path) -> None:
+    scores = score_stories(
+        [cluster()],
+        profile(),
+        tmp_path,
+        CapturingScoringLLM(),
+        extractions=[extraction()],
+    )
+
+    assert scores[0].matched_interests == ["AI"]
+
+
 def test_repeat_story_history_reduces_score_and_novelty(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
     db.initialize(db_path)
-    db.update_story_history(db_path, [("fingerprint", "OpenAI launches coding agents")], "2026-08-14")
+    db.update_story_history(
+        db_path, [("fingerprint", "OpenAI launches coding agents")], "2026-08-14"
+    )
     scores = score_stories([cluster()], profile(), tmp_path, llm=None, db_path=db_path)
 
     assert scores[0].raw_final_score is not None

@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+import feedparser
 import pytest
 import respx
 from httpx import Response
@@ -18,6 +19,7 @@ from morning_radio.newsroom.feeds import (
     discover_candidates,
     fair_cap_candidates,
     fetch_enabled_feeds,
+    parse_feed_candidates,
 )
 from morning_radio.settings import (
     AppSettings,
@@ -40,13 +42,19 @@ def test_candidate_id_is_stable_for_tracking_variants() -> None:
     assert first == second
 
 
-def feed(feed_id: str, *, priority: int = 3) -> FeedConfig:
+def feed(
+    feed_id: str,
+    *,
+    priority: int = 3,
+    interest_hints: list[str] | None = None,
+) -> FeedConfig:
     return FeedConfig(
         id=feed_id,
         name=feed_id,
         url=HttpUrl(f"https://{feed_id}.example.com/rss"),
         enabled=True,
         priority=priority,
+        interest_hints=interest_hints or [],
     )
 
 
@@ -79,6 +87,19 @@ def rss(items: list[tuple[str, str]]) -> str:
         for slug, title in items
     )
     return f"<?xml version='1.0'?><rss version='2.0'><channel><title>Feed</title>{entries}</channel></rss>"
+
+
+def test_feed_interest_hints_are_preserved_on_candidates() -> None:
+    configured_feed = feed("bills", interest_hints=["Bills Football"])
+    parsed = feedparser.parse(rss([("story", "Roster move announced")]).encode())
+    candidates = parse_feed_candidates(
+        configured_feed,
+        parsed,
+        datetime(2026, 8, 15, tzinfo=UTC),
+        datetime(2026, 8, 14, tzinfo=UTC),
+    )
+
+    assert candidates[0].interest_hints == ["Bills Football"]
 
 
 def story(feed_id: str, slug: str) -> CandidateStory:

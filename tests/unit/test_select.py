@@ -73,7 +73,9 @@ def settings() -> AppSettings:
     )
 
 
-def score(cluster_id: str, final_score: int = 86, matched_interest: str | None = None) -> StoryScore:
+def score(
+    cluster_id: str, final_score: int = 86, matched_interest: str | None = None
+) -> StoryScore:
     return StoryScore(
         cluster_id=cluster_id,
         relevance=90,
@@ -136,12 +138,67 @@ def test_selection_allows_repeated_profile_interest_before_generic_filler(tmp_pa
     assert result.not_selected_high_score[0].rejection_reason == "profile_mismatch_padding"
 
 
-def test_selection_still_limits_repeated_generic_subjects(tmp_path: Path) -> None:
+def test_selection_still_limits_repeated_low_priority_subjects(tmp_path: Path) -> None:
+    editorial_profile = profile().model_copy(
+        update={"interests": [Interest(name="Sports", priority=1, depth="normal")]}
+    )
     result = select_stories(
-        [generic_score("one", final_score=70), generic_score("one", final_score=70)],
-        profile(),
+        [
+            score("one", final_score=70, matched_interest="Sports"),
+            score("two", final_score=70, matched_interest="Sports"),
+            score("three", final_score=70, matched_interest="Sports"),
+        ],
+        editorial_profile,
         settings(),
         tmp_path,
         target_minutes=10,
     )
     assert result.not_selected_high_score[0].rejection_reason == "subject_diversity"
+
+
+def test_selection_reserves_one_distinct_story_per_available_interest(tmp_path: Path) -> None:
+    editorial_profile = profile().model_copy(
+        update={
+            "interests": [
+                Interest(name="Bills Football", priority=1, depth="normal"),
+                Interest(name="AI", priority=5, depth="normal"),
+                Interest(name="Apple Incorporated", priority=3, depth="normal"),
+            ]
+        }
+    )
+    result = select_stories(
+        [
+            score("ai-one", final_score=90, matched_interest="AI"),
+            score("ai-two", final_score=89, matched_interest="AI"),
+            score("ai-three", final_score=88, matched_interest="AI"),
+            score("apple", final_score=30, matched_interest="Apple Incorporated"),
+            score("bills", final_score=45, matched_interest="Bills Football"),
+        ],
+        editorial_profile,
+        settings(),
+        tmp_path,
+        target_minutes=10,
+    )
+
+    assert [item.cluster_id for item in result.selected] == ["ai-one", "apple", "bills"]
+    assert result.uncovered_interests == []
+
+
+def test_selection_reports_interest_without_an_eligible_story(tmp_path: Path) -> None:
+    editorial_profile = profile().model_copy(
+        update={
+            "interests": [
+                Interest(name="AI", priority=5, depth="normal"),
+                Interest(name="Apple Incorporated", priority=3, depth="normal"),
+            ]
+        }
+    )
+    result = select_stories(
+        [score("ai", final_score=90, matched_interest="AI")],
+        editorial_profile,
+        settings(),
+        tmp_path,
+        target_minutes=10,
+    )
+
+    assert result.uncovered_interests == ["Apple Incorporated"]

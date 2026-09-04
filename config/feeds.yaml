@@ -35,10 +35,11 @@ feeds:
     category_hints: [local]
     geography_hints: [Buffalo, Western New York]
     priority: 4
-  - id: espn-bills
-    name: ESPN Buffalo Bills
-    url: https://www.espn.com/espn/rss/nfl/news
+  - id: buffalo-bills-official
+    name: Buffalo Bills Official News
+    url: https://www.buffalobills.com/rss/news
     enabled: true
     category_hints: [sports, nfl, bills]
     geography_hints: [Buffalo]
-    priority: 2
+    interest_hints: [Bills Football]
+    priority: 4

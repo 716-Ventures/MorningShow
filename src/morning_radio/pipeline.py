@@ -135,6 +135,7 @@ def _run_pipeline(
         context.run_dir,
         llm,
         extractions=extractions,
+        candidates=candidates,
         editorial_memory_path=context.root / "data" / "editorial-memory.md",
         db_path=context.root / "data" / "app.db",
     )
@@ -201,7 +202,9 @@ def _run_pipeline(
         context.register_artifact("production_plan", context.run_dir / "production-plan.json")
 
         context.transition(StageStatus.SYNTHESIZING)
-        audio = synthesize_script(final_script, production_settings, context.run_dir, profile=profile)
+        audio = synthesize_script(
+            final_script, production_settings, context.run_dir, profile=profile
+        )
         plan = attach_audio_to_plan(plan, audio)
         write_production_plan(plan, context.run_dir)
         context.register_artifact("raw_audio", context.run_dir / "raw-audio")
@@ -281,7 +284,9 @@ def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Fixture news file is invalid JSON: {fixture_path}") from exc
     if not isinstance(raw_articles, list) or not raw_articles:
-        raise RuntimeError(f"Fixture news file must contain a non-empty article list: {fixture_path}")
+        raise RuntimeError(
+            f"Fixture news file must contain a non-empty article list: {fixture_path}"
+        )
 
     candidates: list[CandidateStory] = []
     extractions: list[ExtractionResult] = []
@@ -295,8 +300,16 @@ def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list
         if not title or not category:
             raise RuntimeError(f"Fixture article #{index} must include title and category.")
         raw_status = str(raw_article.get("extraction_status", "usable"))
-        if raw_status not in {"usable", "too_short", "fetch_failed", "unsupported_content", "parse_failed"}:
-            raise RuntimeError(f"Fixture article #{index} has invalid extraction_status: {raw_status}")
+        if raw_status not in {
+            "usable",
+            "too_short",
+            "fetch_failed",
+            "unsupported_content",
+            "parse_failed",
+        }:
+            raise RuntimeError(
+                f"Fixture article #{index} has invalid extraction_status: {raw_status}"
+            )
         status = cast(
             Literal["usable", "too_short", "fetch_failed", "unsupported_content", "parse_failed"],
             raw_status,
@@ -333,7 +346,9 @@ def _fixture_news(run_dir: Path, root: Path) -> tuple[list[CandidateStory], list
             text=article_text,
             word_count=len(article_text.split()),
             extraction_status=status,
-            failure_reason=None if status == "usable" else str(raw_article.get("failure_reason", status)),
+            failure_reason=None
+            if status == "usable"
+            else str(raw_article.get("failure_reason", status)),
         )
         candidates.append(candidate)
         extractions.append(extraction)

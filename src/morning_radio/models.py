@@ -163,6 +163,7 @@ class FeedConfig(PersistedModel):
     enabled: bool
     category_hints: list[str] = Field(default_factory=list)
     geography_hints: list[str] = Field(default_factory=list)
+    interest_hints: list[str] = Field(default_factory=list)
     priority: int = Field(ge=1, le=5)
 
 
@@ -177,6 +178,7 @@ class CandidateStory(PersistedModel):
     feed_summary: str | None = None
     category_hints: list[str] = Field(default_factory=list)
     geography_hints: list[str] = Field(default_factory=list)
+    interest_hints: list[str] = Field(default_factory=list)
 
 
 class ExtractionResult(PersistedModel):
@@ -252,6 +254,7 @@ class SelectedStory(PersistedModel):
 class SelectionResult(PersistedModel):
     selected: list[SelectedStory]
     not_selected_high_score: list[SelectedStory] = Field(default_factory=list)
+    uncovered_interests: list[str] = Field(default_factory=list)
 
 
 class DossierFact(PersistedModel):
@@ -312,9 +315,7 @@ class StoryDossier(PersistedModel):
             raise ValueError("safe dossiers must include at least one sourced fact")
         source_ids = set(self.source_ids)
         fact_ids = {
-            candidate_id
-            for fact in self.facts
-            for candidate_id in fact.supporting_candidate_ids
+            candidate_id for fact in self.facts for candidate_id in fact.supporting_candidate_ids
         }
         unknown_ids = fact_ids - source_ids
         if unknown_ids:
@@ -333,7 +334,9 @@ class StoryDossier(PersistedModel):
 
 class RundownSegment(PersistedModel):
     segment_id: str
-    type: Literal["opening", "headlines", "story", "quick_hits", "local", "sports", "watch_list", "closing"]
+    type: Literal[
+        "opening", "headlines", "story", "quick_hits", "local", "sports", "watch_list", "closing"
+    ]
     title: str
     cluster_ids: list[str] = Field(default_factory=list)
     planned_seconds: int = Field(gt=0)
