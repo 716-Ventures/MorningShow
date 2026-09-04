@@ -94,13 +94,17 @@ class ExplodingScoringLLM:
         raise AssertionError("LLM should not be called for oversized scoring prompts")
 
 
-def profile(*, negative_preferences: list[str] | None = None) -> EditorialProfile:
+def profile(
+    *,
+    interests: list[Interest] | None = None,
+    negative_preferences: list[str] | None = None,
+) -> EditorialProfile:
     now = datetime(2026, 8, 15, tzinfo=UTC)
     return EditorialProfile(
         created_at=now,
         updated_at=now,
         location=LocationProfile(home="Buffalo, NY", local_scope="Western New York"),
-        interests=[Interest(name="AI", priority=5, depth="normal", subtopics=["agents"])],
+        interests=interests or [Interest(name="AI", priority=5, depth="normal", subtopics=["agents"])],
         global_news=GlobalNewsProfile(include_major_us=True, include_major_world=True),
         negative_preferences=negative_preferences or [],
         editorial_style=EditorialStyle(
@@ -198,6 +202,110 @@ def test_negative_preference_is_persisted_as_modifier(tmp_path: Path) -> None:
     assert scores[0].raw_final_score is not None
     assert scores[0].final_score == max(0, scores[0].raw_final_score - 35)
     assert scores[0].modifiers[0].name == "negative_preference"
+
+
+def test_short_interest_terms_do_not_match_inside_unrelated_words(tmp_path: Path) -> None:
+    scores = score_stories(
+        [
+            Cluster(
+                cluster_id="cluster-001",
+                canonical_title="Argentina restates claims",
+                candidate_ids=["candidate-001"],
+                source_count=1,
+                topic_hints=["general", "world"],
+                fingerprint="fingerprint",
+            )
+        ],
+        profile(),
+        tmp_path,
+        llm=None,
+    )
+
+    assert scores[0].matched_interests == []
+
+
+def test_heuristic_scoring_uses_interest_aliases_and_extraction_text(tmp_path: Path) -> None:
+    scores = score_stories(
+        [
+            Cluster(
+                cluster_id="cluster-001",
+                canonical_title="New model tools arrive for developers",
+                candidate_ids=["candidate-001"],
+                source_count=1,
+                topic_hints=["general"],
+                fingerprint="fingerprint",
+            )
+        ],
+        profile(),
+        tmp_path,
+        llm=None,
+        extractions=[
+            ExtractionResult(
+                candidate_id="candidate-001",
+                url="https://example.com/story",
+                title="New model tools arrive for developers",
+                text="OpenAI agents can now complete longer software tasks.",
+                word_count=8,
+                extraction_status="usable",
+            )
+        ],
+    )
+
+    assert scores[0].matched_interests == ["AI"]
+
+
+def test_heuristic_scoring_maps_apple_alias_to_profile_interest(tmp_path: Path) -> None:
+    scores = score_stories(
+        [
+            Cluster(
+                cluster_id="cluster-001",
+                canonical_title="What to expect at Apple's September launch event",
+                candidate_ids=["candidate-001"],
+                source_count=1,
+                topic_hints=["technology"],
+                fingerprint="fingerprint",
+            )
+        ],
+        profile(
+            interests=[
+                Interest(name="Apple Incorporated", priority=3, depth="normal"),
+            ]
+        ),
+        tmp_path,
+        llm=None,
+    )
+
+    assert scores[0].matched_interests == ["Apple Incorporated"]
+
+
+def test_bills_interest_does_not_match_generic_nfl_page_boilerplate(tmp_path: Path) -> None:
+    scores = score_stories(
+        [
+            Cluster(
+                cluster_id="cluster-001",
+                canonical_title="What to expect from the Jaguars this season",
+                candidate_ids=["candidate-001"],
+                source_count=1,
+                topic_hints=["sports", "nfl", "bills"],
+                fingerprint="fingerprint",
+            )
+        ],
+        profile(interests=[Interest(name="Bills Football", priority=1, depth="normal")]),
+        tmp_path,
+        llm=None,
+        extractions=[
+            ExtractionResult(
+                candidate_id="candidate-001",
+                url="https://example.com/story",
+                title="What to expect from the Jaguars this season",
+                text="Page navigation includes Buffalo Bills among many other team links.",
+                word_count=9,
+                extraction_status="usable",
+            )
+        ],
+    )
+
+    assert scores[0].matched_interests == []
 
 
 def test_repeat_story_history_reduces_score_and_novelty(tmp_path: Path) -> None:

@@ -88,6 +88,21 @@ def score(cluster_id: str, final_score: int = 86, matched_interest: str | None =
     )
 
 
+def generic_score(cluster_id: str, final_score: int = 60) -> StoryScore:
+    return StoryScore(
+        cluster_id=cluster_id,
+        relevance=20,
+        importance=50,
+        freshness=80,
+        locality=20,
+        novelty=80,
+        confidence=70,
+        matched_interests=[],
+        reason="fixture",
+        final_score=final_score,
+    )
+
+
 def test_selection_uses_target_minutes_override_without_mutating_profile(tmp_path: Path) -> None:
     editorial_profile = profile()
     result = select_stories(
@@ -103,9 +118,27 @@ def test_selection_uses_target_minutes_override_without_mutating_profile(tmp_pat
     assert editorial_profile.show_format.target_minutes == 25
 
 
-def test_selection_records_specific_rejection_reason(tmp_path: Path) -> None:
+def test_selection_allows_repeated_profile_interest_before_generic_filler(tmp_path: Path) -> None:
     result = select_stories(
-        [score("one", matched_interest="ai"), score("one-again", final_score=70, matched_interest="ai")],
+        [
+            score("interest-one", final_score=70, matched_interest="AI"),
+            score("interest-two", final_score=69, matched_interest="AI"),
+            generic_score("generic-one", final_score=60),
+        ],
+        profile(),
+        settings(),
+        tmp_path,
+        target_minutes=10,
+    )
+    assert [item.cluster_id for item in result.selected[:2]] == ["interest-one", "interest-two"]
+    assert [item.cluster_id for item in result.selected] == ["interest-one", "interest-two"]
+    assert result.not_selected_high_score[0].cluster_id == "generic-one"
+    assert result.not_selected_high_score[0].rejection_reason == "profile_mismatch_padding"
+
+
+def test_selection_still_limits_repeated_generic_subjects(tmp_path: Path) -> None:
+    result = select_stories(
+        [generic_score("one", final_score=70), generic_score("one", final_score=70)],
         profile(),
         settings(),
         tmp_path,

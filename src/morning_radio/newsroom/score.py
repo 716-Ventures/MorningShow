@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import json
+import re
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -14,6 +16,7 @@ from morning_radio.models import (
     Cluster,
     EditorialProfile,
     ExtractionResult,
+    Interest,
     ScoreModifier,
     StoryScore,
 )
@@ -60,8 +63,8 @@ def score_stories(
                 },
             )
         else:
-            return _score_with_llm(scoring_prompt, clusters, profile, history, run_dir, llm)
-    return _score_with_heuristics(clusters, profile, history, run_dir)
+            return _score_with_llm(scoring_prompt, clusters, profile, history, run_dir, llm, extraction_payload)
+    return _score_with_heuristics(clusters, profile, history, run_dir, extraction_payload)
 
 
 def _score_with_llm(
@@ -71,6 +74,7 @@ def _score_with_llm(
     history: dict[str, dict[str, str | int | None]],
     run_dir: Path,
     llm: LLMClient,
+    extraction_payload: dict[str, list[dict[str, str | int | None]]],
 ) -> list[StoryScore]:
     try:
         response = llm.generate_structured(
@@ -96,7 +100,7 @@ def _score_with_llm(
                 "fixture_fallback": allows_fixture_fallback(llm),
             },
         )
-    return _score_with_heuristics(clusters, profile, history, run_dir)
+    return _score_with_heuristics(clusters, profile, history, run_dir, extraction_payload)
 
 
 def _score_with_heuristics(
@@ -104,20 +108,25 @@ def _score_with_heuristics(
     profile: EditorialProfile,
     history: dict[str, dict[str, str | int | None]],
     run_dir: Path,
+    extraction_payload: dict[str, list[dict[str, str | int | None]]],
 ) -> list[StoryScore]:
-    interest_terms = {
-        term.lower(): item
-        for item in profile.interests
-        for term in [item.name, *item.subtopics]
-        if term
-    }
-    negative_terms = [item.lower() for item in profile.negative_preferences]
+    interest_terms = build_interest_terms(profile)
+    negative_terms = [item.casefold() for item in profile.negative_preferences]
     scores: list[StoryScore] = []
     for cluster in clusters:
-        haystack = " ".join([cluster.canonical_title, *cluster.topic_hints]).lower()
-        matched = [name for name in interest_terms if name in haystack]
-        negative = [name for name in negative_terms if name in haystack]
-        priority_boost = max((interest_terms[name].priority for name in matched), default=0) * 10
+        title_haystack, context_haystack = cluster_haystacks(cluster, extraction_payload)
+        matched_interests = matched_profile_interests(
+            interest_terms,
+            title_haystack,
+            context_haystack,
+        )
+        matched = [interest.name for interest in matched_interests]
+        negative = [
+            name
+            for name in negative_terms
+            if term_matches(name, title_haystack) or term_matches(name, context_haystack)
+        ]
+        priority_boost = max((interest.priority for interest in matched_interests), default=0) * 10
         relevance = min(100, 20 + priority_boost + len(matched) * 10)
         importance = min(100, 35 + cluster.source_count * 12)
         if any(hint in {"world", "us", "general"} for hint in cluster.topic_hints):
@@ -144,6 +153,102 @@ def _score_with_heuristics(
             )
         )
     return _persist_scores(apply_score_modifiers(scores, clusters, profile, history), run_dir)
+
+
+def build_interest_terms(profile: EditorialProfile) -> dict[str, Interest]:
+    terms: dict[str, Interest] = {}
+    for interest in profile.interests:
+        for term in expand_interest_terms(interest.name, interest.subtopics):
+            terms[term] = interest
+    return terms
+
+
+def matched_profile_interests(
+    interest_terms: dict[str, Interest],
+    title_haystack: str,
+    context_haystack: str,
+) -> list[Interest]:
+    matched: list[Interest] = []
+    seen: set[str] = set()
+    for term, interest in interest_terms.items():
+        key = interest.name.casefold()
+        if key in seen:
+            continue
+        if term_matches(term, title_haystack) or (
+            allow_context_interest_match(term) and term_matches(term, context_haystack)
+        ):
+            matched.append(interest)
+            seen.add(key)
+    return matched
+
+
+def expand_interest_terms(name: str, subtopics: list[str]) -> set[str]:
+    terms = {normalize_term(term) for term in [name, *subtopics] if normalize_term(term)}
+    normalized_name = normalize_term(name)
+    if normalized_name in {"ai", "artificial intelligence"}:
+        terms.update(
+            {
+                "ai",
+                "artificial intelligence",
+                "generative ai",
+                "machine learning",
+                "openai",
+                "anthropic",
+                "llm",
+                "agents",
+                "chatbot",
+                "data center",
+                "data centre",
+            }
+        )
+    if "apple" in normalized_name:
+        terms.update(
+            {
+                "apple",
+                "iphone",
+                "ipad",
+                "mac",
+                "macos",
+                "ios",
+                "vision pro",
+                "tim cook",
+                "john ternus",
+            }
+        )
+    if "bills" in normalized_name or normalized_name == "buffalo bills":
+        terms.update({"buffalo bills", "bills"})
+    return terms
+
+
+def normalize_term(term: str) -> str:
+    return " ".join(html.unescape(term).casefold().split())
+
+
+def cluster_haystacks(
+    cluster: Cluster,
+    extraction_payload: dict[str, list[dict[str, str | int | None]]],
+) -> tuple[str, str]:
+    title_values: list[str] = [cluster.canonical_title]
+    context_values: list[str] = []
+    for evidence in extraction_payload.get(cluster.cluster_id, []):
+        title = evidence.get("title")
+        if isinstance(title, str):
+            title_values.append(title)
+        excerpt = evidence.get("excerpt")
+        if isinstance(excerpt, str):
+            context_values.append(excerpt)
+    return normalize_term(" ".join(title_values)), normalize_term(" ".join(context_values))
+
+
+def allow_context_interest_match(term: str) -> bool:
+    return len(term) > 3 and term not in {"apple", "bills", "buffalo bills", "agents"}
+
+
+def term_matches(term: str, haystack: str) -> bool:
+    if not term:
+        return False
+    pattern = r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])"
+    return re.search(pattern, haystack) is not None
 
 
 def load_editorial_memory(path: Path | None) -> str:
