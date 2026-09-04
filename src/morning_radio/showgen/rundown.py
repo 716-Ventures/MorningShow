@@ -45,9 +45,15 @@ def build_rundown(
                 validation_errors = validate_rundown(candidate, profile, dossiers, target_minutes * 60)
                 if not validation_errors:
                     return _persist_rundown(candidate, run_dir)
-            except (LLMError, ValidationError):
-                if not allows_fixture_fallback(llm):
-                    raise
+            except (LLMError, ValidationError) as exc:
+                atomic_write_json(
+                    run_dir / "logs" / "rundown-fallback.json",
+                    {
+                        "model": llm.model,
+                        "reason": str(exc),
+                        "fixture_fallback": allows_fixture_fallback(llm),
+                    },
+                )
                 break
     segments: list[RundownSegment] = [
         RundownSegment(

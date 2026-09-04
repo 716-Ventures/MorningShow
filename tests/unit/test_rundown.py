@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
+from morning_radio.llm.client import LLMInvalidResponseError
 from morning_radio.models import (
     DossierFact,
     EditorialProfile,
@@ -54,6 +55,16 @@ class CorrectingRundownLLM:
                 ],
             )
         )
+
+
+class FailingRundownLLM:
+    model = "small-local-model"
+
+    def generate_text(self, *args, **kwargs):
+        return ""
+
+    def generate_structured(self, *args, **kwargs):
+        raise LLMInvalidResponseError("missing rundown wrapper")
 
 
 def profile() -> EditorialProfile:
@@ -143,3 +154,23 @@ def test_build_rundown_retries_with_validation_errors(tmp_path: Path) -> None:
     assert rundown.segments[0].cluster_ids == ["cluster-001"]
     assert llm.payloads[1]["validation_errors"]
     assert (tmp_path / "rundown.json").exists()
+
+
+def test_recoverable_rundown_model_error_uses_fallback_with_diagnostic(
+    tmp_path: Path,
+) -> None:
+    rundown = build_rundown(
+        date(2026, 8, 15),
+        10,
+        profile(),
+        [dossier("cluster-001"), dossier("cluster-002")],
+        tmp_path,
+        FailingRundownLLM(),
+    )
+
+    story_segments = [segment for segment in rundown.segments if segment.type == "story"]
+    assert [segment.cluster_ids for segment in story_segments] == [["cluster-001"], ["cluster-002"]]
+    assert (tmp_path / "rundown.json").exists()
+    diagnostic = (tmp_path / "logs" / "rundown-fallback.json").read_text(encoding="utf-8")
+    assert "small-local-model" in diagnostic
+    assert "missing rundown wrapper" in diagnostic
