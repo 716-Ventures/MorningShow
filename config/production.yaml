@@ -1,4 +1,4 @@
-generate_audio: false
+generate_audio: true
 
 tts:
   engine: kokoro
