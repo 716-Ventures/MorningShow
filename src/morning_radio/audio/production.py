@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, TypeAdapter
 
 from morning_radio.artifacts.io import atomic_write_json
-from morning_radio.audio.tts import TTSAdapter, build_tts_adapter, speech_hash
+from morning_radio.audio.tts import TTSAdapter, build_tts_adapter, prepare_tts_text, speech_hash
 from morning_radio.models import AudioMetadata, EditorialProfile
 from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
@@ -79,7 +79,8 @@ def synthesize_script(
     available = set(adapter.available_voices())
     manifest: list[AudioMetadata] = []
     cache: dict[str, AudioMetadata] = {}
-    for index, (host, text) in enumerate(spoken_blocks(script), start=1):
+    speech_blocks = tts_spoken_blocks(script, production.tts.max_chunk_words)
+    for index, (host, text) in enumerate(speech_blocks, start=1):
         selected_voice = secondary if host == "HOST 2" else voice
         if (
             production.tts.engine == "kokoro"
@@ -89,7 +90,7 @@ def synthesize_script(
             selected_voice = "af_heart"
         if selected_voice not in available:
             raise RuntimeError(f"Configured voice '{selected_voice}' is unavailable.")
-        normalized = " ".join(text.split())
+        normalized = prepare_tts_text(text, production.tts.pronunciation_overrides)
         text_hash = speech_hash(
             production.tts.engine,
             adapter.engine_version,
@@ -101,7 +102,7 @@ def synthesize_script(
             manifest.append(cache[text_hash])
             continue
         path = run_dir / "raw-audio" / f"{index:03d}-{host.lower().replace(' ', '-')}.wav"
-        metadata = adapter.synthesize(text, selected_voice, path, speed=production.tts.speed)
+        metadata = adapter.synthesize(normalized, selected_voice, path, speed=production.tts.speed)
         cache[text_hash] = metadata
         manifest.append(metadata)
     atomic_write_json(
@@ -115,11 +116,15 @@ def resolve_voices(
     production: ProductionSettings, profile: EditorialProfile | None = None
 ) -> tuple[str, str]:
     primary = production.tts.voice or profile_voice(profile, "primary_voice") or "tone"
-    secondary = production.tts.secondary_voice or profile_voice(profile, "secondary_voice") or primary
+    secondary = (
+        production.tts.secondary_voice or profile_voice(profile, "secondary_voice") or primary
+    )
     return primary, secondary
 
 
-def profile_voice(profile: EditorialProfile | None, field_name: Literal["primary_voice", "secondary_voice"]) -> str | None:
+def profile_voice(
+    profile: EditorialProfile | None, field_name: Literal["primary_voice", "secondary_voice"]
+) -> str | None:
     if profile is None:
         return None
     return getattr(profile.voice_preferences, field_name)
@@ -203,11 +208,49 @@ def build_text_production_plan(
                 current_host = line.strip("[]")
             continue
         else:
-            plan.append(SpeechItem(text=line, host=current_host))
+            if plan and isinstance(plan[-1], SpeechItem) and production.tts.inter_block_pause_ms:
+                plan.append(PauseItem(milliseconds=production.tts.inter_block_pause_ms))
+            chunks = split_tts_text(line, production.tts.max_chunk_words)
+            for index, chunk in enumerate(chunks):
+                plan.append(SpeechItem(text=chunk, host=current_host))
+                if index < len(chunks) - 1 and production.tts.sentence_pause_ms:
+                    plan.append(PauseItem(milliseconds=production.tts.sentence_pause_ms))
     if bed_active:
         raise ProductionPlanError("A bed was started but never stopped.")
     write_production_plan(plan, run_dir)
     return plan
+
+
+def tts_spoken_blocks(script: str, max_chunk_words: int) -> list[tuple[str, str]]:
+    return [
+        (host, chunk)
+        for host, text in spoken_blocks(script)
+        for chunk in split_tts_text(text, max_chunk_words)
+    ]
+
+
+def split_tts_text(text: str, max_chunk_words: int) -> list[str]:
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+        if sentence.strip()
+    ]
+    if not sentences:
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+    for sentence in sentences:
+        sentence_words = len(sentence.split())
+        if current and current_words + sentence_words > max_chunk_words:
+            chunks.append(" ".join(current))
+            current = []
+            current_words = 0
+        current.append(sentence)
+        current_words += sentence_words
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
 
 
 def attach_audio_to_plan(

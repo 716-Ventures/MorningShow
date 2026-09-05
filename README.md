@@ -28,6 +28,13 @@ Generated scripts and intermediate artifacts are written under `runs/YYYY-MM-DD/
 
 To reactivate MP3 generation, set `generate_audio: true` in `config/production.yaml` and install the audio runtime with `uv sync --extra tts`. Audio-enabled runs additionally require Kokoro, FFmpeg, and FFprobe.
 
+Speech preparation is configured under `tts` in `config/production.yaml`. Add names or terms to
+`pronunciation_overrides` using the exact written form as the key and a phonetic, listener-facing
+form as the value. `inter_block_pause_ms` controls the short pause inserted between adjacent host
+paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_words`, with
+`sentence_pause_ms` inserted between those groups. Explicit `[PAUSE: ...]` directives are left
+unchanged.
+
 ## Local Dependencies
 
 `./show doctor` checks the required local tools and configuration:

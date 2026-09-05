@@ -26,12 +26,18 @@ def test_valid_config_loads(tmp_path: Path) -> None:
     assert settings.news.minimum_article_words > 0
     assert any(feed.enabled for feed in feeds.feeds)
     assert production.generate_audio is False
+    assert production.tts.inter_block_pause_ms == 220
+    assert production.tts.sentence_pause_ms == 140
+    assert production.tts.max_chunk_words == 55
+    assert production.tts.pronunciation_overrides["OpenAI"] == "Open A I"
 
 
 def test_invalid_numeric_boundary_fails(tmp_path: Path) -> None:
     copy_config(tmp_path)
     path = tmp_path / "config" / "app.yaml"
-    path.write_text(path.read_text().replace("minimum_article_words: 200", "minimum_article_words: 0"))
+    path.write_text(
+        path.read_text().replace("minimum_article_words: 200", "minimum_article_words: 0")
+    )
     with pytest.raises(ConfigError):
         load_app_settings(tmp_path)
 

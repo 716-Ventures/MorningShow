@@ -5,6 +5,13 @@ tts:
   voice: null
   secondary_voice: null
   speed: 1.0
+  inter_block_pause_ms: 220
+  sentence_pause_ms: 140
+  max_chunk_words: 55
+  pronunciation_overrides:
+    OpenAI: Open A I
+    macOS: mac O S
+    iOS: eye O S
 
 audio:
   bitrate_kbps: 128

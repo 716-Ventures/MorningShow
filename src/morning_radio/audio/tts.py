@@ -4,7 +4,9 @@ import hashlib
 import importlib.metadata
 import math
 import os
+import re
 import shutil
+import unicodedata
 import wave
 from array import array
 from collections.abc import Callable
@@ -18,14 +20,61 @@ class TTSError(RuntimeError):
     pass
 
 
+def prepare_tts_text(text: str, pronunciation_overrides: dict[str, str] | None = None) -> str:
+    spoken = unicodedata.normalize("NFKC", text)
+    spoken = spoken.replace("\u2018", "'").replace("\u2019", "'")
+    spoken = spoken.replace("\u201c", '"').replace("\u201d", '"')
+    spoken = re.sub(r"\s*[\u2013\u2014]\s*", ", ", spoken)
+    spoken = spoken.replace("&", " and ")
+
+    protected_replacements: dict[str, str] = {}
+    for index, (source, replacement) in enumerate(
+        sorted(
+            (pronunciation_overrides or {}).items(),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        )
+    ):
+        placeholder = f"pronunciationoverride{index}token"
+        protected_replacements[placeholder] = replacement
+        pattern = rf"(?<![\w]){re.escape(source)}(?![\w])"
+        spoken = re.sub(
+            pattern, lambda _match, value=placeholder: value, spoken, flags=re.IGNORECASE
+        )
+
+    spoken = re.sub(
+        r"\bA\$(\d+(?:\.\d+)?)\s*(b|bn|m)\b",
+        lambda match: _spoken_amount(match.group(1), match.group(2), "Australian dollars"),
+        spoken,
+        flags=re.IGNORECASE,
+    )
+    spoken = re.sub(
+        r"\$(\d+(?:\.\d+)?)\s*(b|bn|m)\b",
+        lambda match: _spoken_amount(match.group(1), match.group(2), "dollars"),
+        spoken,
+        flags=re.IGNORECASE,
+    )
+    spoken = re.sub(r"(?<=\d)%", " percent", spoken)
+    spoken = re.sub(r"\bNo\.\s*(\d+)", r"number \1", spoken, flags=re.IGNORECASE)
+    spoken = re.sub(r"\b[A-Z]{2,5}\b", lambda match: " ".join(match.group(0)), spoken)
+    for placeholder, replacement in protected_replacements.items():
+        spoken = spoken.replace(placeholder, replacement)
+    return " ".join(spoken.split())
+
+
+def _spoken_amount(number: str, suffix: str, currency: str) -> str:
+    magnitude = "billion" if suffix.casefold() in {"b", "bn"} else "million"
+    return f"{number} {magnitude} {currency}"
+
+
 class TTSAdapter(Protocol):
     engine_version: str
 
-    def available_voices(self) -> list[str]:
-        ...
+    def available_voices(self) -> list[str]: ...
 
-    def synthesize(self, text: str, voice: str, output_path: Path, *, speed: float = 1.0) -> AudioMetadata:
-        ...
+    def synthesize(
+        self, text: str, voice: str, output_path: Path, *, speed: float = 1.0
+    ) -> AudioMetadata: ...
 
 
 class ToneTTS:
@@ -36,7 +85,9 @@ class ToneTTS:
     def available_voices(self) -> list[str]:
         return ["tone"]
 
-    def synthesize(self, text: str, voice: str, output_path: Path, *, speed: float = 1.0) -> AudioMetadata:
+    def synthesize(
+        self, text: str, voice: str, output_path: Path, *, speed: float = 1.0
+    ) -> AudioMetadata:
         if voice not in self.available_voices():
             raise TTSError(f"Voice unavailable: {voice}")
         normalized = " ".join(text.split())
@@ -44,7 +95,9 @@ class ToneTTS:
         duration = max(1.0, min(18.0, len(normalized.split()) / (2.4 * speed)))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         _write_tone_wav(output_path, duration)
-        return AudioMetadata(voice=voice, text_hash=text_hash, duration_seconds=duration, path=output_path)
+        return AudioMetadata(
+            voice=voice, text_hash=text_hash, duration_seconds=duration, path=output_path
+        )
 
 
 def _write_tone_wav(path: Path, duration_seconds: float, sample_rate: int = 44100) -> None:
@@ -85,7 +138,9 @@ class KokoroTTS:
             try:
                 from kokoro import KPipeline  # type: ignore
             except ImportError as exc:
-                raise TTSError("Kokoro is not importable. Install the local Kokoro TTS backend.") from exc
+                raise TTSError(
+                    "Kokoro is not importable. Install the local Kokoro TTS backend."
+                ) from exc
             pipeline_factory = KPipeline
         if pipeline_factory is None:
             raise TTSError("Kokoro pipeline factory is unavailable.")
@@ -108,7 +163,9 @@ class KokoroTTS:
             "bm_george",
         ]
 
-    def synthesize(self, text: str, voice: str, output_path: Path, *, speed: float = 1.0) -> AudioMetadata:
+    def synthesize(
+        self, text: str, voice: str, output_path: Path, *, speed: float = 1.0
+    ) -> AudioMetadata:
         if voice not in self.available_voices():
             raise TTSError(f"Voice unavailable: {voice}")
         normalized = " ".join(text.split())
@@ -121,7 +178,9 @@ class KokoroTTS:
         if not chunks:
             raise TTSError("Kokoro returned no audio.")
         duration = self._audio_writer(output_path, chunks, 24000)
-        return AudioMetadata(voice=voice, text_hash=text_hash, duration_seconds=duration, path=output_path)
+        return AudioMetadata(
+            voice=voice, text_hash=text_hash, duration_seconds=duration, path=output_path
+        )
 
     def _pipeline_for(self, lang_code: str) -> Any:
         if lang_code not in self._pipelines:
@@ -141,7 +200,9 @@ def write_kokoro_audio(output_path: Path, chunks: list[Any], sample_rate: int) -
     return len(waveform) / sample_rate
 
 
-def speech_hash(engine: str, engine_version: str, voice: str, speed: float, normalized_text: str) -> str:
+def speech_hash(
+    engine: str, engine_version: str, voice: str, speed: float, normalized_text: str
+) -> str:
     return hashlib.sha256(
         f"{engine}:{engine_version}:{voice}:{speed}:{normalized_text}".encode()
     ).hexdigest()

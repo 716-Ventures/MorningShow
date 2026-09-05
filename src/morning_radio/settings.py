@@ -51,6 +51,18 @@ class TTSSettings(BaseModel):
     voice: str | None = None
     secondary_voice: str | None = None
     speed: float = Field(gt=0, le=3)
+    inter_block_pause_ms: int = Field(default=220, ge=0, le=2000)
+    sentence_pause_ms: int = Field(default=140, ge=0, le=1000)
+    max_chunk_words: int = Field(default=55, ge=15, le=150)
+    pronunciation_overrides: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("pronunciation_overrides")
+    @classmethod
+    def valid_pronunciation_overrides(cls, value: dict[str, str]) -> dict[str, str]:
+        cleaned = {source.strip(): spoken.strip() for source, spoken in value.items()}
+        if any(not source or not spoken for source, spoken in cleaned.items()):
+            raise ValueError("pronunciation overrides may not contain empty terms")
+        return cleaned
 
 
 class AudioSettings(BaseModel):

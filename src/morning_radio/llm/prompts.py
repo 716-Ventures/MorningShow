@@ -28,6 +28,8 @@ directives: [MUSIC: OPENING], [MUSIC: CLOSING], [BUMPER: name], [BED: name], [BE
 Do not include markdown lists, URLs, fake quotes, or facts absent from dossiers. Never mention
 internal editorial machinery such as scoring, selected-story reasons, editorial profiles,
 discovery windows, validation, models, prompts, pipelines, or why the system included an item.
+Write for speech: prefer sentences of 8 to 22 words, avoid semicolons and nested clauses, spell
+out uncommon abbreviations on first use, and use punctuation where a presenter should breathe.
 Respect each story's supplied target word count and distribute time evenly when targets are equal.
 Return JSON with the complete script in the script field."""
 
