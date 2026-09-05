@@ -2,7 +2,7 @@ generate_audio: false
 
 tts:
   engine: kokoro
-  voice: null
+  voice: af_bella
   secondary_voice: null
   speed: 1.0
   inter_block_pause_ms: 220
