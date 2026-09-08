@@ -56,9 +56,13 @@ def prepare_tts_text(text: str, pronunciation_overrides: dict[str, str] | None =
     )
     spoken = re.sub(r"(?<=\d)%", " percent", spoken)
     spoken = re.sub(r"\bNo\.\s*(\d+)", r"number \1", spoken, flags=re.IGNORECASE)
-    spoken = re.sub(r"\b[A-Z]{2,5}\b", lambda match: " ".join(match.group(0)), spoken)
     for placeholder, replacement in protected_replacements.items():
         spoken = spoken.replace(placeholder, replacement)
+    spoken = re.sub(
+        r"\b(?:[A-Z]\s+){1,4}[A-Z]\b",
+        lambda match: "".join(match.group(0).split()),
+        spoken,
+    )
     return " ".join(spoken.split())
 
 

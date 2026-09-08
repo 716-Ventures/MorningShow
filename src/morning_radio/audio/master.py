@@ -63,6 +63,7 @@ def mix_and_master(
     pause_index = 0
     rendered_index = 0
     active_bed: Path | None = None
+    trim_next_speech_leading = False
     for item in typed_plan:
         if isinstance(item, SpeechItem):
             if item.path is None:
@@ -70,9 +71,25 @@ def mix_and_master(
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-speech.wav"
             if active_bed is None:
-                normalize_audio(ffmpeg, item.path, rendered, production, run_dir)
+                normalize_audio(
+                    ffmpeg,
+                    item.path,
+                    rendered,
+                    production,
+                    run_dir,
+                    trim_leading=trim_next_speech_leading,
+                )
             else:
-                mix_bed_under_speech(ffmpeg, item.path, active_bed, rendered, production, run_dir)
+                mix_bed_under_speech(
+                    ffmpeg,
+                    item.path,
+                    active_bed,
+                    rendered,
+                    production,
+                    run_dir,
+                    trim_speech_leading=trim_next_speech_leading,
+                )
+            trim_next_speech_leading = False
             files.append(rendered)
         elif isinstance(item, PauseItem):
             pause_index += 1
@@ -91,7 +108,19 @@ def mix_and_master(
                 raise AudioMasterError(f"Production item has no asset path: {item.directive}")
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-{item.type}.wav"
-            normalize_audio(ffmpeg, item.path, rendered, production, run_dir)
+            is_opening = isinstance(item, MusicItem) and item.directive.casefold() == (
+                "[music: opening]"
+            )
+            normalize_audio(
+                ffmpeg,
+                item.path,
+                rendered,
+                production,
+                run_dir,
+                trim_trailing=is_opening,
+            )
+            if is_opening:
+                trim_next_speech_leading = True
             files.append(rendered)
         elif isinstance(item, BedStartItem):
             if item.skipped:
@@ -187,15 +216,19 @@ def normalize_audio(
     output: Path,
     production: ProductionSettings,
     run_dir: Path,
+    *,
+    trim_leading: bool = False,
+    trim_trailing: bool = False,
 ) -> None:
+    audio_filter = silence_trim_filter(leading=trim_leading, trailing=trim_trailing)
+    filter_args = ["-af", audio_filter] if audio_filter is not None else []
     run_command(
         [
             ffmpeg,
             "-y",
             "-i",
             str(source),
-            "-af",
-            silence_trim_filter(),
+            *filter_args,
             "-ar",
             str(production.audio.sample_rate_hz),
             "-ac",
@@ -207,22 +240,27 @@ def normalize_audio(
     )
 
 
-def silence_trim_filter() -> str:
-    leading = (
+def silence_trim_filter(*, leading: bool, trailing: bool) -> str | None:
+    filters: list[str] = []
+    leading_filter = (
         "silenceremove="
         "start_periods=1:"
         f"start_duration={SILENCE_DETECTION_SECONDS}:"
         f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
         f"start_silence={LEADING_SILENCE_SECONDS}"
     )
-    trailing = (
-        "silenceremove="
-        "start_periods=1:"
-        f"start_duration={SILENCE_DETECTION_SECONDS}:"
-        f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
-        f"start_silence={TRAILING_SILENCE_SECONDS}"
-    )
-    return f"{leading},areverse,{trailing},areverse"
+    if leading:
+        filters.append(leading_filter)
+    if trailing:
+        trailing_filter = (
+            "silenceremove="
+            "start_periods=1:"
+            f"start_duration={SILENCE_DETECTION_SECONDS}:"
+            f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
+            f"start_silence={TRAILING_SILENCE_SECONDS}"
+        )
+        filters.extend(["areverse", trailing_filter, "areverse"])
+    return ",".join(filters) or None
 
 
 def mix_bed_under_speech(
@@ -232,8 +270,11 @@ def mix_bed_under_speech(
     output: Path,
     production: ProductionSettings,
     run_dir: Path,
+    *,
+    trim_speech_leading: bool = False,
 ) -> None:
     layout = "mono" if production.audio.channels == 1 else "stereo"
+    speech_filter = silence_trim_filter(leading=trim_speech_leading, trailing=False) or "anull"
     run_command(
         [
             ffmpeg,
@@ -246,7 +287,7 @@ def mix_bed_under_speech(
             str(bed),
             "-filter_complex",
             (
-                f"[0:a]{silence_trim_filter()}[speech];"
+                f"[0:a]{speech_filter}[speech];"
                 "[1:a]volume=0.18[bed];"
                 f"[speech][bed]amix=inputs=2:duration=first:dropout_transition=0,"
                 f"aresample={production.audio.sample_rate_hz},"

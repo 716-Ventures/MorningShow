@@ -193,7 +193,69 @@ def test_master_command_preserves_configured_audio_format(
     assert master_command[master_command.index("-ac") + 1] == "2"
 
 
-def test_normalize_audio_trims_only_file_boundaries(
+def test_master_trims_only_opener_to_first_speech_transition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    normalizations: list[tuple[str, bool, bool]] = []
+
+    def fake_normalize(
+        _ffmpeg: str,
+        source: Path,
+        output: Path,
+        _production: ProductionSettings,
+        _run_dir: Path,
+        *,
+        trim_leading: bool = False,
+        trim_trailing: bool = False,
+    ) -> None:
+        normalizations.append((source.name, trim_leading, trim_trailing))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"audio")
+
+    def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
+        Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(command[-1]).write_bytes(b"audio")
+
+    def fake_probe(_ffprobe: str, episode: Path, _run_dir: Path):
+        episode.write_bytes(b"mp3")
+        return probe("100.0")
+
+    monkeypatch.setattr(master_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(master_module, "normalize_audio", fake_normalize)
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    monkeypatch.setattr(master_module, "run_probe", fake_probe)
+
+    mix_and_master(
+        [
+            {
+                "type": "music",
+                "directive": "[MUSIC: OPENING]",
+                "path": tmp_path / "opener.wav",
+                "optional": False,
+            },
+            {"type": "speech", "path": tmp_path / "first.wav"},
+            {"type": "pause", "milliseconds": 650},
+            {"type": "speech", "path": tmp_path / "second.wav"},
+            {
+                "type": "music",
+                "directive": "[MUSIC: CLOSING]",
+                "path": tmp_path / "closer.wav",
+                "optional": False,
+            },
+        ],
+        production_settings(),
+        tmp_path,
+    )
+
+    assert normalizations == [
+        ("opener.wav", False, True),
+        ("first.wav", True, False),
+        ("second.wav", False, False),
+        ("closer.wav", False, False),
+    ]
+
+
+def test_normalize_audio_preserves_boundaries_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     commands: list[list[str]] = []
@@ -211,13 +273,37 @@ def test_normalize_audio_trims_only_file_boundaries(
     )
 
     command = commands[0]
+    assert "-af" not in command
+
+
+def test_normalize_audio_can_trim_trailing_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
+        commands.append(command)
+
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    normalize_audio(
+        "/usr/bin/ffmpeg",
+        tmp_path / "source.wav",
+        tmp_path / "output.wav",
+        production_settings(),
+        tmp_path,
+        trim_trailing=True,
+    )
+
+    command = commands[0]
     audio_filter = command[command.index("-af") + 1]
-    assert audio_filter == silence_trim_filter()
-    assert audio_filter.count("silenceremove=") == 2
+    assert audio_filter == silence_trim_filter(leading=False, trailing=True)
+    assert audio_filter.count("silenceremove=") == 1
     assert "areverse" in audio_filter
 
 
-def test_bed_mix_trims_speech_boundaries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bed_mix_preserves_speech_boundaries_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     commands: list[list[str]] = []
 
     def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
@@ -235,8 +321,33 @@ def test_bed_mix_trims_speech_boundaries(tmp_path: Path, monkeypatch: pytest.Mon
 
     command = commands[0]
     audio_filter = command[command.index("-filter_complex") + 1]
-    assert f"[0:a]{silence_trim_filter()}[speech]" in audio_filter
+    assert "[0:a]anull[speech]" in audio_filter
     assert "[speech][bed]amix=" in audio_filter
+
+
+def test_bed_mix_can_trim_leading_speech_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
+        commands.append(command)
+
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    mix_bed_under_speech(
+        "/usr/bin/ffmpeg",
+        tmp_path / "speech.wav",
+        tmp_path / "bed.wav",
+        tmp_path / "output.wav",
+        production_settings(),
+        tmp_path,
+        trim_speech_leading=True,
+    )
+
+    command = commands[0]
+    audio_filter = command[command.index("-filter_complex") + 1]
+    leading_filter = silence_trim_filter(leading=True, trailing=False)
+    assert f"[0:a]{leading_filter}[speech]" in audio_filter
 
 
 def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:

@@ -84,7 +84,7 @@ def test_prepare_tts_text_expands_common_spoken_forms() -> None:
     )
 
     assert prepared == (
-        "Open A I discussed A I spending of 155 billion Australian dollars in N S W, "
+        "Open AI discussed AI spending of 155 billion Australian dollars in NSW, "
         "up 26 percent. number 2 follows R and D."
     )
 
@@ -101,7 +101,11 @@ def test_synthesize_script_sends_prepared_copy_to_adapter(tmp_path: Path) -> Non
 
     synthesize_script("[HOST]\nOpenAI announced AI tools.\n", settings, tmp_path, adapter=adapter)
 
-    assert adapter.calls[0][0] == "Open A I announced A I tools."
+    assert adapter.calls[0][0] == "Open AI announced AI tools."
+
+
+def test_prepare_tts_text_preserves_acronyms_for_kokoro() -> None:
+    assert prepare_tts_text("AI, BBC, UK, UN, AGI, and GPT.") == ("AI, BBC, UK, UN, AGI, and GPT.")
 
 
 def test_prepare_tts_text_expands_compact_dollar_amounts() -> None:
