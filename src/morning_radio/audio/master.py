@@ -26,6 +26,12 @@ class AudioMasterError(RuntimeError):
     pass
 
 
+SILENCE_THRESHOLD_DB = -60
+SILENCE_DETECTION_SECONDS = 0.08
+LEADING_SILENCE_SECONDS = 0.03
+TRAILING_SILENCE_SECONDS = 0.08
+
+
 def write_silence(
     path: Path, milliseconds: int, sample_rate: int = 44100, channels: int = 1
 ) -> None:
@@ -93,7 +99,10 @@ def mix_and_master(
                 continue
             if item.path is None:
                 raise AudioMasterError(f"Bed item has no asset path: {item.directive}")
-            active_bed = item.path
+            rendered_index += 1
+            rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-bed.wav"
+            normalize_audio(ffmpeg, item.path, rendered, production, run_dir)
+            active_bed = rendered
         elif isinstance(item, BedStopItem):
             active_bed = None
         else:
@@ -166,7 +175,9 @@ def metadata_args(episode_title: str, episode_date: str | None) -> list[str]:
     return args
 
 
-def coerce_production_plan(plan: list[ProductionItem] | list[dict[str, Any]]) -> list[ProductionItem]:
+def coerce_production_plan(
+    plan: list[ProductionItem] | list[dict[str, Any]],
+) -> list[ProductionItem]:
     return PRODUCTION_PLAN_ADAPTER.validate_python(plan)
 
 
@@ -183,6 +194,8 @@ def normalize_audio(
             "-y",
             "-i",
             str(source),
+            "-af",
+            silence_trim_filter(),
             "-ar",
             str(production.audio.sample_rate_hz),
             "-ac",
@@ -192,6 +205,24 @@ def normalize_audio(
         run_dir,
         f"normalize-{output.stem}",
     )
+
+
+def silence_trim_filter() -> str:
+    leading = (
+        "silenceremove="
+        "start_periods=1:"
+        f"start_duration={SILENCE_DETECTION_SECONDS}:"
+        f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
+        f"start_silence={LEADING_SILENCE_SECONDS}"
+    )
+    trailing = (
+        "silenceremove="
+        "start_periods=1:"
+        f"start_duration={SILENCE_DETECTION_SECONDS}:"
+        f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
+        f"start_silence={TRAILING_SILENCE_SECONDS}"
+    )
+    return f"{leading},areverse,{trailing},areverse"
 
 
 def mix_bed_under_speech(
@@ -215,8 +246,9 @@ def mix_bed_under_speech(
             str(bed),
             "-filter_complex",
             (
+                f"[0:a]{silence_trim_filter()}[speech];"
                 "[1:a]volume=0.18[bed];"
-                f"[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0,"
+                f"[speech][bed]amix=inputs=2:duration=first:dropout_transition=0,"
                 f"aresample={production.audio.sample_rate_hz},"
                 f"aformat=channel_layouts={layout}[out]"
             ),
@@ -250,7 +282,9 @@ def run_command(command: list[str], run_dir: Path, label: str) -> None:
         )
     except OSError as exc:
         atomic_write_text(stderr_path, str(exc))
-        raise AudioMasterError(f"FFmpeg command could not start for {label}; see {stderr_path}: {exc}") from exc
+        raise AudioMasterError(
+            f"FFmpeg command could not start for {label}; see {stderr_path}: {exc}"
+        ) from exc
     atomic_write_text(stderr_path, result.stderr or "")
     if result.returncode != 0:
         tail = (result.stderr or "").strip().splitlines()[-8:]
@@ -280,9 +314,7 @@ def run_probe(ffprobe: str, episode: Path, run_dir: Path) -> dict[str, Any]:
     atomic_write_text(stderr_path, probe.stderr or "")
     if probe.returncode != 0:
         tail = (probe.stderr or "").strip().splitlines()[-8:]
-        raise AudioMasterError(
-            f"FFprobe failed; see {stderr_path}: " + "\n".join(tail)
-        )
+        raise AudioMasterError(f"FFprobe failed; see {stderr_path}: " + "\n".join(tail))
     try:
         parsed = json.loads(probe.stdout)
     except json.JSONDecodeError as exc:

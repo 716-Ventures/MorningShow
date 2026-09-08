@@ -11,8 +11,11 @@ from morning_radio.audio.master import (
     escape_concat_path,
     metadata_args,
     mix_and_master,
+    mix_bed_under_speech,
+    normalize_audio,
     run_command,
     run_probe,
+    silence_trim_filter,
     validate_final_mp3,
 )
 from morning_radio.settings import ProductionSettings
@@ -38,7 +41,9 @@ def production_settings() -> ProductionSettings:
     )
 
 
-def probe(duration: str, *, sample_rate: str = "44100", channels: int = 2, bit_rate: str = "128000"):
+def probe(
+    duration: str, *, sample_rate: str = "44100", channels: int = 2, bit_rate: str = "128000"
+):
     return {
         "format": {"duration": duration, "bit_rate": bit_rate},
         "streams": [
@@ -186,6 +191,52 @@ def test_master_command_preserves_configured_audio_format(
     master_command = dict(commands)["master"]
     assert master_command[master_command.index("-ar") + 1] == "44100"
     assert master_command[master_command.index("-ac") + 1] == "2"
+
+
+def test_normalize_audio_trims_only_file_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
+        commands.append(command)
+
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    normalize_audio(
+        "/usr/bin/ffmpeg",
+        tmp_path / "source.wav",
+        tmp_path / "output.wav",
+        production_settings(),
+        tmp_path,
+    )
+
+    command = commands[0]
+    audio_filter = command[command.index("-af") + 1]
+    assert audio_filter == silence_trim_filter()
+    assert audio_filter.count("silenceremove=") == 2
+    assert "areverse" in audio_filter
+
+
+def test_bed_mix_trims_speech_boundaries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
+        commands.append(command)
+
+    monkeypatch.setattr(master_module, "run_command", fake_run_command)
+    mix_bed_under_speech(
+        "/usr/bin/ffmpeg",
+        tmp_path / "speech.wav",
+        tmp_path / "bed.wav",
+        tmp_path / "output.wav",
+        production_settings(),
+        tmp_path,
+    )
+
+    command = commands[0]
+    audio_filter = command[command.index("-filter_complex") + 1]
+    assert f"[0:a]{silence_trim_filter()}[speech]" in audio_filter
+    assert "[speech][bed]amix=" in audio_filter
 
 
 def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:
