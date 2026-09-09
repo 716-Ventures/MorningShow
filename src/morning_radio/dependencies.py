@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import dataclass
 
 import httpx
+from pydantic import BaseModel
 
 from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
 from morning_radio.settings import AppSettings, ProductionSettings
@@ -28,6 +29,14 @@ class DependencyPreflightError(RuntimeError):
         super().__init__(message or "Dependency preflight failed.")
 
 
+class ModelTag(BaseModel):
+    name: str
+
+
+class ModelTags(BaseModel):
+    models: list[ModelTag]
+
+
 def check_ffmpeg() -> list[DependencyCheck]:
     checks: list[DependencyCheck] = []
     for binary in ("ffmpeg", "ffprobe"):
@@ -48,9 +57,10 @@ def check_ffmpeg() -> list[DependencyCheck]:
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=30,
             )
             checks.append(DependencyCheck(binary, True, path))
-        except subprocess.CalledProcessError as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             checks.append(
                 DependencyCheck(binary, False, str(exc), "Reinstall or repair the FFmpeg binary.")
             )
@@ -61,7 +71,7 @@ def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
     try:
         response = httpx.get(f"{str(app_settings.llm.base_url).rstrip('/')}/api/tags", timeout=5)
         response.raise_for_status()
-        names = {model.get("name") for model in response.json().get("models", [])}
+        names = {model.name for model in ModelTags.model_validate(response.json()).models}
         model_found = app_settings.llm.model in names
         return [
             DependencyCheck("Ollama reachable", True, str(app_settings.llm.base_url)),
@@ -105,7 +115,7 @@ def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
         adapter = build_tts_adapter(production.tts.engine)
         voices = adapter.available_voices()
         voice = production.tts.voice or "af_heart"
-        return [
+        checks = [
             DependencyCheck("TTS backend", True, "kokoro import"),
             DependencyCheck(
                 "Configured TTS voice",
@@ -114,6 +124,17 @@ def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
                 f"Choose one of: {', '.join(voices)}.",
             ),
         ]
+        if production.tts.secondary_voice is not None:
+            secondary = production.tts.secondary_voice
+            checks.append(
+                DependencyCheck(
+                    "Secondary TTS voice",
+                    secondary in voices,
+                    secondary,
+                    f"Choose one of: {', '.join(voices)}.",
+                )
+            )
+        return checks
     except RuntimeError as exc:
         return [
             DependencyCheck(

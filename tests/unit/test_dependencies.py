@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import subprocess
+
+import httpx
+import pytest
+import respx
 from pydantic import HttpUrl
 
+from morning_radio import dependencies
 from morning_radio.dependencies import DependencyCheck, DependencyPreflightError, morning_preflight
 from morning_radio.settings import (
     AppSettings,
@@ -106,3 +112,54 @@ def test_morning_preflight_skips_audio_dependencies_when_disabled(monkeypatch) -
     )
 
     assert morning_preflight(app_settings(), production) == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[], {"models": None}, {"models": [None]}, {"models": [{"name": "test"}]}, {"models": []}],
+)
+def test_llm_diagnostic_validates_envelope(payload):
+    with respx.mock as router:
+        router.get("http://ollama.test/api/tags").mock(httpx.Response(200, json=payload))
+        result = dependencies.check_llm(app_settings())
+    assert all(item.ok for item in result) == (payload == {"models": [{"name": "test"}]})
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("cannot execute"),
+        subprocess.TimeoutExpired("ffmpeg", 30),
+        subprocess.CalledProcessError(1, "ffmpeg"),
+    ],
+)
+def test_binary_failures_are_actionable(monkeypatch, error):
+    monkeypatch.setattr(dependencies.shutil, "which", lambda name: name)
+
+    def fail(*args, **kwargs):
+        assert kwargs["timeout"] > 0
+        raise error
+
+    monkeypatch.setattr(dependencies.subprocess, "run", fail)
+    assert all(not check.ok and check.action for check in dependencies.check_ffmpeg())
+
+
+def test_missing_binaries(monkeypatch):
+    monkeypatch.setattr(dependencies.shutil, "which", lambda name: None)
+    assert all(not check.ok for check in dependencies.check_ffmpeg())
+
+
+def test_kokoro_missing_and_invalid_voice(monkeypatch):
+    production = production_settings()
+    production.tts.engine = "kokoro"
+    monkeypatch.setattr(dependencies, "kokoro_importable", lambda: False)
+    assert not dependencies.check_tts(production)[0].ok
+    monkeypatch.setattr(dependencies, "kokoro_importable", lambda: True)
+
+    class Voices:
+        def available_voices(self):
+            return ["af_bella", "af_heart"]
+
+    monkeypatch.setattr(dependencies, "build_tts_adapter", lambda engine: Voices())
+    production.tts.secondary_voice = "missing"
+    assert any(not check.ok for check in dependencies.check_tts(production))

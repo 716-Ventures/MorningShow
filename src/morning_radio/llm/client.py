@@ -7,12 +7,20 @@ from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from morning_radio.logging import log_model_call
 from morning_radio.settings import LLMSettings
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class OllamaResponse(BaseModel):
+    response: str = Field(strict=True)
+    load_duration: int | None = Field(default=None, ge=0)
+    total_duration: int | None = Field(default=None, ge=0)
+    eval_duration: int | None = Field(default=None, ge=0)
+    eval_count: int | None = Field(default=None, ge=0)
 
 
 class LLMError(RuntimeError):
@@ -54,21 +62,31 @@ class OllamaClient:
         self.fixture_fallback = False
         self.run_dir = run_dir
         self._client = httpx.Client(timeout=settings.timeout_seconds)
+        self._metrics: dict[str, int | None] = {}
 
     def close(self) -> None:
         self._client.close()
 
-    @staticmethod
-    def _response_text(response: httpx.Response) -> str:
-        payload = response.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("response"), str):
-            raise LLMInvalidResponseError("Ollama response must contain a string response field.")
-        return payload["response"]
+    def _response_text(self, response: httpx.Response) -> str:
+        try:
+            payload = OllamaResponse.model_validate(response.json())
+        except ValidationError as exc:
+            raise LLMInvalidResponseError(
+                "Ollama response must contain a string response field and valid timing metadata."
+            ) from exc
+        self._metrics = {
+            "load_duration_ns": payload.load_duration,
+            "total_duration_ns": payload.total_duration,
+            "eval_duration_ns": payload.eval_duration,
+            "eval_count": payload.eval_count,
+        }
+        return payload.response
 
     def generate_text(
         self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str
     ) -> str:
         started = time.monotonic()
+        self._metrics = {}
         try:
             payload = {
                 "model": self.settings.model,
@@ -106,6 +124,7 @@ class OllamaClient:
         last_error: str | None = None
         for attempt in range(3):
             started = time.monotonic()
+            self._metrics = {}
             try:
                 payload = {
                     "model": self.settings.model,
@@ -162,6 +181,7 @@ class OllamaClient:
                 "success": success,
                 "retry_count": retry_count,
                 "error": error,
+                **self._metrics,
             },
         )
 

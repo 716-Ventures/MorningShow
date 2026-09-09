@@ -13,6 +13,9 @@ from dateutil import parser as date_parser
 from morning_radio.artifacts.io import atomic_write_jsonl
 from morning_radio.logging import log_line
 from morning_radio.models import CandidateStory, FeedConfig
+from morning_radio.newsroom.download import get_checked_response_async
+from morning_radio.newsroom.fetch import UnsafeUrlError
+from morning_radio.newsroom.transport import PublicAsyncTransport
 from morning_radio.settings import AppSettings, FeedSettings
 
 TRACKING_KEYS = {"fbclid", "gclid", "mc_cid", "mc_eid"}
@@ -123,9 +126,11 @@ async def fetch_enabled_feeds(
 ) -> list[tuple[FeedConfig, bytes | None, str | None]]:
     semaphore = asyncio.Semaphore(concurrency)
     async with httpx.AsyncClient(
+        transport=PublicAsyncTransport(),
+        trust_env=False,
         timeout=timeout_seconds,
         headers=headers,
-        follow_redirects=True,
+        follow_redirects=False,
     ) as client:
         tasks = [fetch_feed(feed, client, semaphore) for feed in feeds]
         return await asyncio.gather(*tasks)
@@ -136,15 +141,10 @@ async def fetch_feed(
 ) -> tuple[FeedConfig, bytes | None, str | None]:
     async with semaphore:
         try:
-            async with client.stream("GET", str(feed.url)) as response:
-                response.raise_for_status()
-                content = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(content) + len(chunk) > 5_000_000:
-                        raise ValueError("Feed exceeded 5 MB decoded size limit")
-                    content.extend(chunk)
-                return feed, bytes(content), None
-        except (httpx.HTTPError, ValueError) as exc:
+            response = await get_checked_response_async(str(feed.url), client, max_bytes=5_000_000)
+            response.raise_for_status()
+            return feed, response.content, None
+        except (httpx.HTTPError, ValueError, UnsafeUrlError) as exc:
             return feed, None, str(exc)
 
 

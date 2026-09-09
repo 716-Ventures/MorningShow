@@ -3,22 +3,23 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
-from urllib.parse import urljoin
 
 import httpx
 import trafilatura
 
 from morning_radio.artifacts.io import atomic_write_json
 from morning_radio.models import CandidateStory, ExtractionResult
-from morning_radio.newsroom.fetch import UnsafeUrlError, assert_safe_public_url
+from morning_radio.newsroom.download import get_checked_response as _get_checked_response
+from morning_radio.newsroom.download import (
+    get_checked_response_async as _get_checked_response_async,
+)
+from morning_radio.newsroom.fetch import UnsafeUrlError
+from morning_radio.newsroom.transport import PublicAsyncTransport
 from morning_radio.settings import AppSettings
 
 
 class ExtractionStageError(RuntimeError):
     pass
-
-
-MAX_REDIRECTS = 5
 
 
 def normalize_text(text: str) -> str:
@@ -55,6 +56,8 @@ async def extract_ranked_articles(
 ) -> list[ExtractionResult]:
     semaphore = asyncio.Semaphore(settings.news.concurrency)
     async with httpx.AsyncClient(
+        transport=PublicAsyncTransport(),
+        trust_env=False,
         timeout=settings.news.request_timeout_seconds,
         follow_redirects=False,
         headers=headers,
@@ -163,65 +166,4 @@ def _extraction_from_response(
         word_count=word_count,
         extraction_status=status,
         failure_reason=reason,
-    )
-
-
-def _get_checked_response(
-    url: str, client: httpx.Client, *, max_bytes: int = 2_000_000
-) -> httpx.Response:
-    current_url = url
-    visited: set[str] = set()
-    for _ in range(MAX_REDIRECTS + 1):
-        assert_safe_public_url(current_url)
-        if current_url in visited:
-            raise UnsafeUrlError(f"Redirect loop detected: {current_url}")
-        visited.add(current_url)
-        with client.stream("GET", current_url, follow_redirects=False) as response:
-            if response.status_code not in {301, 302, 303, 307, 308}:
-                body = bytearray()
-                for chunk in response.iter_bytes():
-                    if len(body) + len(chunk) > max_bytes:
-                        raise UnsafeUrlError("HTML body exceeded configured size limit")
-                    body.extend(chunk)
-                return _buffered_response(response, bytes(body))
-            location = response.headers.get("location")
-        if not location:
-            raise UnsafeUrlError(f"Redirect response missing Location header: {current_url}")
-        current_url = urljoin(current_url, location)
-    raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
-
-
-async def _get_checked_response_async(
-    url: str, client: httpx.AsyncClient, *, max_bytes: int = 2_000_000
-) -> httpx.Response:
-    """Validate each redirect and bound decoded bytes before buffering the body."""
-    current_url = url
-    visited: set[str] = set()
-    for _ in range(MAX_REDIRECTS + 1):
-        await asyncio.to_thread(assert_safe_public_url, current_url)
-        if current_url in visited:
-            raise UnsafeUrlError(f"Redirect loop detected: {current_url}")
-        visited.add(current_url)
-        async with client.stream("GET", current_url, follow_redirects=False) as response:
-            if response.status_code not in {301, 302, 303, 307, 308}:
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > max_bytes:
-                        raise UnsafeUrlError("HTML body exceeded configured size limit")
-                    body.extend(chunk)
-                return _buffered_response(response, bytes(body))
-            location = response.headers.get("location")
-        if not location:
-            raise UnsafeUrlError(f"Redirect response missing Location header: {current_url}")
-        current_url = urljoin(current_url, location)
-    raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
-
-
-def _buffered_response(response: httpx.Response, body: bytes) -> httpx.Response:
-    # HTTPX already decoded compression while streaming; do not decode it twice.
-    headers = dict(response.headers)
-    headers.pop("content-encoding", None)
-    headers.pop("content-length", None)
-    return httpx.Response(
-        response.status_code, headers=headers, content=body, request=response.request
     )

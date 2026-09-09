@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,15 @@ from morning_radio.settings import (
     SelectionSettings,
     VerificationSettings,
 )
+
+
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
 
 
 def test_canonicalize_removes_tracking_and_fragment() -> None:
