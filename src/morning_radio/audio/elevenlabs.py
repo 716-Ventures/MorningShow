@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import wave
 from pathlib import Path
@@ -156,5 +157,30 @@ def _check_status(response: httpx.Response) -> None:
         402: "Check your ElevenLabs credits or subscription.",
         429: "Check your quota and rate limits before retrying.",
     }.get(response.status_code, "Check the voice/model settings or ElevenLabs service status.")
+    try:
+        body = bytearray()
+        for chunk in response.iter_bytes(chunk_size=4096):
+            body.extend(chunk)
+            if len(body) > 16_384:
+                break
+        data = json.loads(body) if len(body) <= 16_384 else None
+        detail = data.get("detail") if isinstance(data, dict) else None
+        if isinstance(detail, dict):
+            code = detail.get("status")
+            if isinstance(code, str) and code in {
+                "missing_permissions",
+                "insufficient_permissions",
+            }:
+                message = detail.get("message", "")
+                if isinstance(message, str) and "voices_read" in message:
+                    guidance = "This key lacks Voices Read (voices_read). Enable Voices > Read in its ElevenLabs API key permissions."
+                elif isinstance(message, str) and "text_to_speech" in message:
+                    guidance = "This key lacks Text to Speech permission. Enable it in the ElevenLabs API key settings."
+                else:
+                    guidance = "This key lacks a required permission. Enable Voices Read and Text to Speech in its ElevenLabs API key settings."
+            elif code == "quota_exceeded":
+                guidance = "Your ElevenLabs quota is exhausted. Check credits and the key's character limit."
+    except (ValueError, httpx.HTTPError):
+        pass
     # Never echo remote bodies or HTTP exception reprs; they may contain supplied secrets.
     raise TTSError(f"ElevenLabs returned HTTP {response.status_code}. {guidance}")

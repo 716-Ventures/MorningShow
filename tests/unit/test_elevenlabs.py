@@ -185,3 +185,50 @@ def test_elevenlabs_does_not_inherit_kokoro_secondary_voice():
     profile = default_profile()
     profile.voice_preferences.secondary_voice = "af_bella"
     assert resolve_voices(load_production_settings(), profile) == (VOICE, VOICE)
+
+
+@pytest.mark.parametrize("operation", ["lookup", "speech"])
+@pytest.mark.parametrize(
+    "status,message,expected",
+    [
+        (
+            "missing_permissions",
+            "The API key is missing permission voices_read test-secret-never-log",
+            "Voices Read",
+        ),
+        (
+            "missing_permissions",
+            "Missing text_to_speech test-secret-never-log",
+            "Text to Speech permission",
+        ),
+        ("missing_permissions", "test-secret-never-log", "required permission"),
+        ("quota_exceeded", "test-secret-never-log", "quota is exhausted"),
+    ],
+)
+def test_401_diagnostic_uses_provider_reason_without_exposing_body(
+    settings, tmp_path, operation, status, message, expected
+):
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(401, json={"detail": {"status": status, "message": message}})
+        )
+    ) as client:
+        adapter = ElevenLabsTTS(settings, client=client)
+        with pytest.raises(TTSError, match=expected) as error:
+            if operation == "lookup":
+                adapter.available_voices()
+            else:
+                adapter.synthesize("Hello.", VOICE, tmp_path / "sample.wav")
+        assert "test-secret" not in str(error.value)
+        assert "Check ELEVENLABS_API_KEY" not in str(error.value)
+
+
+@pytest.mark.parametrize("body", [b"not JSON", b"x" * 20_000, b"[]", b'{"detail": "bad"}'])
+def test_unstructured_error_uses_safe_default(settings, tmp_path, body):
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(401, content=body))
+        ) as client,
+        pytest.raises(TTSError, match="Check ELEVENLABS_API_KEY"),
+    ):
+        ElevenLabsTTS(settings, client=client).synthesize("Hello.", VOICE, tmp_path / "sample.wav")
