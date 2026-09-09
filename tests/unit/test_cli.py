@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -91,8 +92,13 @@ def test_show_help_runs_from_other_working_directory(tmp_path: Path) -> None:
 
 
 def test_wheel_includes_explicit_subpackages(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    if uv is None:
+        user_installs = sorted((Path.home() / "Library/Python").glob("*/bin/uv"))
+        uv = str(user_installs[-1]) if user_installs else None
+    assert uv is not None, "Install uv and add it to PATH to run the packaging test."
     subprocess.run(
-        ["/Users/chrisjdavis/Library/Python/3.9/bin/uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        [uv, "build", "--wheel", "--out-dir", str(tmp_path)],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,

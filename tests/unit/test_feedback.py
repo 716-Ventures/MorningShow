@@ -41,7 +41,9 @@ def answers() -> dict[str, str | None]:
 
 
 def test_update_editorial_memory_uses_llm_output(tmp_path: Path) -> None:
-    updated = update_editorial_memory("# Editorial Memory\n\nOld rule.\n", answers(), tmp_path, MemoryLLM())
+    updated = update_editorial_memory(
+        "# Editorial Memory\n\nOld rule.\n", answers(), tmp_path, MemoryLLM()
+    )
     assert "practical developer implications" in updated
     assert "Old rule" not in updated
     assert updated.startswith("# Editorial Memory")

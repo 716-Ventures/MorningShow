@@ -24,12 +24,26 @@ class SameEventDecision(BaseModel):
             elif isinstance(normalized.get("related"), bool):
                 normalized["same_event"] = normalized["related"]
             elif isinstance(normalized.get("decision"), str):
-                decision = normalized["decision"].casefold()
-                normalized["same_event"] = "same" in decision and "different" not in decision
+                decision = " ".join(normalized["decision"].casefold().replace("_", " ").split())
+                if decision in {"same", "same event", "the same event"}:
+                    normalized["same_event"] = True
+                elif decision in {
+                    "different",
+                    "different event",
+                    "different events",
+                    "not same",
+                    "not same event",
+                    "not the same event",
+                }:
+                    normalized["same_event"] = False
         normalized.setdefault("canonical_title", "")
         normalized.setdefault(
             "reason",
-            str(normalized.get("explanation") or normalized.get("decision") or "local model decision"),
+            str(
+                normalized.get("explanation")
+                or normalized.get("decision")
+                or "local model decision"
+            ),
         )
         return normalized
 

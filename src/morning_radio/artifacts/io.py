@@ -11,8 +11,8 @@ def atomic_write_text(path: Path, text: str) -> None:
     tmp_path: Path | None = None
     try:
         with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-            handle.write(text)
             tmp_path = Path(handle.name)
+            handle.write(text)
         tmp_path.replace(path)
     except Exception:
         if tmp_path is not None:

@@ -64,24 +64,24 @@ Local scope: {profile.location.local_scope}
 
 ## General News
 
-- Major U.S. news: {'yes' if profile.global_news.include_major_us else 'no'}
-- Major world news: {'yes' if profile.global_news.include_major_world else 'no'}
+- Major U.S. news: {"yes" if profile.global_news.include_major_us else "no"}
+- Major world news: {"yes" if profile.global_news.include_major_world else "no"}
 - Threshold: {profile.global_news.threshold}
 
 ## Style
 
 - Depth: {profile.editorial_style.context_level}
-- Assume familiarity: {'yes' if profile.editorial_style.assume_subject_familiarity else 'no'}
+- Assume familiarity: {"yes" if profile.editorial_style.assume_subject_familiarity else "no"}
 - Ongoing stories: {profile.editorial_style.ongoing_story_policy}
-- Avoid padding: {'yes' if profile.editorial_style.avoid_padding else 'no'}
+- Avoid padding: {"yes" if profile.editorial_style.avoid_padding else "no"}
 
 ## Format
 
 - Target minutes: {profile.show_format.target_minutes}
-- Variable length: {'yes' if profile.show_format.allow_variable_length else 'no'}
+- Variable length: {"yes" if profile.show_format.allow_variable_length else "no"}
 - Range: {profile.show_format.minimum_minutes}-{profile.show_format.maximum_minutes} minutes
-- Headline open: {'yes' if profile.show_format.headline_open else 'no'}
-- Watch-list close: {'yes' if profile.show_format.watch_list_close else 'no'}
+- Headline open: {"yes" if profile.show_format.headline_open else "no"}
+- Watch-list close: {"yes" if profile.show_format.watch_list_close else "no"}
 - Hosts: {profile.show_format.host_count}
 
 ## Exclusions

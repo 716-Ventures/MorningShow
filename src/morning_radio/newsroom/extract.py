@@ -39,7 +39,9 @@ def extract_articles(
     headers = {"User-Agent": "PersonalMorningRadioPOC/0.1 (+local operator)"}
     results = asyncio.run(extract_ranked_articles(ranked, settings, headers))
     for result in results:
-        atomic_write_json(output_dir / f"{result.candidate_id}.json", result.model_dump(mode="json"))
+        atomic_write_json(
+            output_dir / f"{result.candidate_id}.json", result.model_dump(mode="json")
+        )
     usable = [item for item in results if item.extraction_status == "usable"]
     if len(usable) < settings.news.minimum_usable_articles:
         raise ExtractionStageError(
@@ -69,8 +71,10 @@ async def _extract_one_async(
 ) -> ExtractionResult:
     async with semaphore:
         try:
-            response = await _get_checked_response_async(candidate.url, client)
-            return _extraction_from_response(candidate, settings, response)
+            response = await _get_checked_response_async(
+                candidate.url, client, max_bytes=settings.news.max_html_bytes
+            )
+            return await asyncio.to_thread(_extraction_from_response, candidate, settings, response)
         except (httpx.HTTPError, UnsafeUrlError) as exc:
             return ExtractionResult(
                 candidate_id=candidate.candidate_id,
@@ -84,7 +88,9 @@ def _extract_one(
     candidate: CandidateStory, settings: AppSettings, client: httpx.Client
 ) -> ExtractionResult:
     try:
-        response = _get_checked_response(candidate.url, client)
+        response = _get_checked_response(
+            candidate.url, client, max_bytes=settings.news.max_html_bytes
+        )
         return _extraction_from_response(candidate, settings, response)
     except (httpx.HTTPError, UnsafeUrlError) as exc:
         return ExtractionResult(
@@ -160,7 +166,9 @@ def _extraction_from_response(
     )
 
 
-def _get_checked_response(url: str, client: httpx.Client) -> httpx.Response:
+def _get_checked_response(
+    url: str, client: httpx.Client, *, max_bytes: int = 2_000_000
+) -> httpx.Response:
     current_url = url
     visited: set[str] = set()
     for _ in range(MAX_REDIRECTS + 1):
@@ -168,33 +176,52 @@ def _get_checked_response(url: str, client: httpx.Client) -> httpx.Response:
         if current_url in visited:
             raise UnsafeUrlError(f"Redirect loop detected: {current_url}")
         visited.add(current_url)
-        response = client.get(current_url)
-        if response.status_code not in {301, 302, 303, 307, 308}:
-            return response
-        location = response.headers.get("location")
-        response.close()
+        with client.stream("GET", current_url, follow_redirects=False) as response:
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(body) + len(chunk) > max_bytes:
+                        raise UnsafeUrlError("HTML body exceeded configured size limit")
+                    body.extend(chunk)
+                return _buffered_response(response, bytes(body))
+            location = response.headers.get("location")
         if not location:
             raise UnsafeUrlError(f"Redirect response missing Location header: {current_url}")
         current_url = urljoin(current_url, location)
-        assert_safe_public_url(current_url)
     raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
 
 
-async def _get_checked_response_async(url: str, client: httpx.AsyncClient) -> httpx.Response:
+async def _get_checked_response_async(
+    url: str, client: httpx.AsyncClient, *, max_bytes: int = 2_000_000
+) -> httpx.Response:
+    """Validate each redirect and bound decoded bytes before buffering the body."""
     current_url = url
     visited: set[str] = set()
     for _ in range(MAX_REDIRECTS + 1):
-        assert_safe_public_url(current_url)
+        await asyncio.to_thread(assert_safe_public_url, current_url)
         if current_url in visited:
             raise UnsafeUrlError(f"Redirect loop detected: {current_url}")
         visited.add(current_url)
-        response = await client.get(current_url)
-        if response.status_code not in {301, 302, 303, 307, 308}:
-            return response
-        location = response.headers.get("location")
-        await response.aclose()
+        async with client.stream("GET", current_url, follow_redirects=False) as response:
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > max_bytes:
+                        raise UnsafeUrlError("HTML body exceeded configured size limit")
+                    body.extend(chunk)
+                return _buffered_response(response, bytes(body))
+            location = response.headers.get("location")
         if not location:
             raise UnsafeUrlError(f"Redirect response missing Location header: {current_url}")
         current_url = urljoin(current_url, location)
-        assert_safe_public_url(current_url)
     raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
+
+
+def _buffered_response(response: httpx.Response, body: bytes) -> httpx.Response:
+    # HTTPX already decoded compression while streaming; do not decode it twice.
+    headers = dict(response.headers)
+    headers.pop("content-encoding", None)
+    headers.pop("content-length", None)
+    return httpx.Response(
+        response.status_code, headers=headers, content=body, request=response.request
+    )

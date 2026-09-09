@@ -30,8 +30,9 @@ class LLMInvalidResponseError(LLMError):
 class LLMClient(Protocol):
     model: str
 
-    def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
-        ...
+    def generate_text(
+        self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str
+    ) -> str: ...
 
     def generate_structured(
         self,
@@ -41,11 +42,12 @@ class LLMClient(Protocol):
         *,
         stage: str,
         prompt_type: str,
-    ) -> T:
-        ...
+    ) -> T: ...
 
 
 class OllamaClient:
+    """One pooled HTTP client per run; the creating workflow must call close()."""
+
     def __init__(self, settings: LLMSettings, run_dir: Path):
         self.settings = settings
         self.model = settings.model
@@ -53,7 +55,19 @@ class OllamaClient:
         self.run_dir = run_dir
         self._client = httpx.Client(timeout=settings.timeout_seconds)
 
-    def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
+    def close(self) -> None:
+        self._client.close()
+
+    @staticmethod
+    def _response_text(response: httpx.Response) -> str:
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("response"), str):
+            raise LLMInvalidResponseError("Ollama response must contain a string response field.")
+        return payload["response"]
+
+    def generate_text(
+        self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str
+    ) -> str:
         started = time.monotonic()
         try:
             payload = {
@@ -67,7 +81,7 @@ class OllamaClient:
                 json=payload,
             )
             response.raise_for_status()
-            text = str(response.json().get("response", ""))
+            text = self._response_text(response)
             if not text.strip():
                 raise LLMInvalidResponseError("Ollama returned an empty response.")
             self._log(stage, prompt_type, user_prompt, started, True, 0, None)
@@ -109,7 +123,7 @@ class OllamaClient:
                     json=payload,
                 )
                 response.raise_for_status()
-                raw = response.json().get("response", "")
+                raw = self._response_text(response)
                 parsed = json.loads(raw)
                 value = response_model.model_validate(parsed)
                 self._log(stage, prompt_type, prompt, started, True, attempt, None)
@@ -117,7 +131,7 @@ class OllamaClient:
             except httpx.HTTPError as exc:
                 self._log(stage, prompt_type, prompt, started, False, attempt, str(exc))
                 raise LLMConnectionError(f"Ollama request failed: {exc}") from exc
-            except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+            except (ValidationError, TypeError, ValueError, LLMInvalidResponseError) as exc:
                 last_error = str(exc)
                 self._log(stage, prompt_type, prompt, started, False, attempt, last_error)
                 prompt = (
@@ -156,7 +170,9 @@ class FakeLLM:
     model = "fake-local-fixture"
     fixture_fallback = True
 
-    def generate_text(self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str) -> str:
+    def generate_text(
+        self, system_prompt: str, user_prompt: str, *, stage: str, prompt_type: str
+    ) -> str:
         if stage == "writing":
             return "[HOST]\nGood morning. This is a fixture morning show.\n"
         return "{}"
@@ -203,5 +219,7 @@ def _fake_payload(stage: str, user_prompt: str) -> dict[str, Any]:
                     "corrected_script_required": False,
                 }
             }
-        return {"verification": {"status": "pass", "issues": [], "corrected_script_required": False}}
+        return {
+            "verification": {"status": "pass", "issues": [], "corrected_script_required": False}
+        }
     return {}

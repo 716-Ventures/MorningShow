@@ -45,8 +45,8 @@ def doctor() -> None:
 
     checks.append(
         (
-            "Python 3.12+",
-            sys.version_info >= (3, 12),
+            "Python 3.12 or 3.13",
+            (3, 12) <= sys.version_info < (3, 14),
             f"found {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         )
     )
@@ -81,7 +81,9 @@ def doctor() -> None:
 
     if production_settings is not None and production_settings.generate_audio:
         checks.extend((check.name, check.ok, check.detail) for check in check_ffmpeg())
-        checks.extend((check.name, check.ok, check.detail) for check in check_tts(production_settings))
+        checks.extend(
+            (check.name, check.ok, check.detail) for check in check_tts(production_settings)
+        )
 
     if feeds is not None:
         enabled = [feed for feed in feeds.feeds if feed.enabled]
@@ -98,7 +100,9 @@ def doctor() -> None:
 
 @app.command()
 def morning(
-    minutes: Annotated[int | None, typer.Option(help="Override profile target duration.")] = None,
+    minutes: Annotated[
+        int | None, typer.Option(min=5, max=90, help="Override profile target duration.")
+    ] = None,
     date_: Annotated[str | None, typer.Option("--date", help="Episode date as YYYY-MM-DD.")] = None,
     no_assets: Annotated[bool, typer.Option(help="Disable music, bumpers, and beds.")] = False,
 ) -> None:
@@ -131,7 +135,9 @@ def morning(
 
 
 @app.command()
-def feedback(run_id: Annotated[str | None, typer.Argument(help="Run id to attach feedback to.")] = None) -> None:
+def feedback(
+    run_id: Annotated[str | None, typer.Argument(help="Run id to attach feedback to.")] = None,
+) -> None:
     """Record post-listening feedback and update editorial memory."""
     record_feedback(run_id)
 

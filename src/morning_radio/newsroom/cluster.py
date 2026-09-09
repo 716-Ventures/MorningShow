@@ -33,7 +33,9 @@ STOPWORDS = {
     "update",
 }
 
-PUBLISHER_SUFFIX = re.compile(r"\s+[-|]\s+(ap|associated press|reuters|bbc|cnn|npr|axios|the verge).*$", re.IGNORECASE)
+PUBLISHER_SUFFIX = re.compile(
+    r"\s+[-|]\s+(ap|associated press|reuters|bbc|cnn|npr|axios|the verge).*$", re.IGNORECASE
+)
 HIGH_CONFIDENCE_SIMILARITY = 0.72
 AMBIGUOUS_SIMILARITY = 0.30
 TIME_BLOCK_HOURS = 36
@@ -52,7 +54,11 @@ def cluster_stories(
     llm: LLMClient | None = None,
 ) -> list[Cluster]:
     usable_ids = {item.candidate_id for item in extractions if item.extraction_status == "usable"}
-    by_id = {candidate.candidate_id: candidate for candidate in candidates if candidate.candidate_id in usable_ids}
+    by_id = {
+        candidate.candidate_id: candidate
+        for candidate in candidates
+        if candidate.candidate_id in usable_ids
+    }
     ordered_candidates = sorted(by_id.values(), key=lambda item: item.candidate_id)
     union_find = UnionFind([item.candidate_id for item in ordered_candidates])
     decisions: list[dict[str, str | bool | float]] = []
@@ -107,7 +113,9 @@ def cluster_stories(
                 fingerprint=fingerprint,
             )
         )
-    atomic_write_json(run_dir / "clusters.json", [item.model_dump(mode="json") for item in clusters])
+    atomic_write_json(
+        run_dir / "clusters.json", [item.model_dump(mode="json") for item in clusters]
+    )
     decisions_path = run_dir / "logs" / "cluster-decisions.json"
     atomic_write_json(decisions_path, decisions)
     return clusters

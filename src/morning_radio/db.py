@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -46,13 +47,19 @@ CREATE TABLE IF NOT EXISTS feedback_sessions (
 Migration = Callable[[sqlite3.Connection], None]
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
+@contextmanager
+def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Own one connection and transaction; rollback on failure and always close."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def initialize(db_path: Path) -> None:
@@ -78,7 +85,9 @@ def initialize(db_path: Path) -> None:
 
 
 def latest_migration_version(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").fetchone()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+    ).fetchone()
     return int(row["version"])
 
 
@@ -89,12 +98,19 @@ def migrate_1(conn: sqlite3.Connection) -> None:
 MIGRATIONS: list[tuple[int, Migration]] = [(1, migrate_1)]
 
 
-def record_run(db_path: Path, run_id: str, requested_date: str, status: str, run_path: Path) -> None:
+def record_run(
+    db_path: Path, run_id: str, requested_date: str, status: str, run_path: Path
+) -> None:
     with connect(db_path) as conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO runs(run_id, requested_date, status, run_path, started_at, completed_at)
+            INSERT INTO runs(run_id, requested_date, status, run_path, started_at, completed_at)
             VALUES (?, ?, ?, ?, COALESCE((SELECT started_at FROM runs WHERE run_id = ?), ?), NULL)
+            ON CONFLICT(run_id) DO UPDATE SET
+              requested_date = excluded.requested_date,
+              status = excluded.status,
+              run_path = excluded.run_path,
+              completed_at = NULL
             """,
             (
                 run_id,

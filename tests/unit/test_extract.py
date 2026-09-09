@@ -93,8 +93,9 @@ def test_safe_relative_redirect_succeeds() -> None:
 def test_redirect_loop_is_rejected() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.get("http://public.test/start").mock(Response(302, headers={"location": "/start"}))
-        with httpx.Client(follow_redirects=False) as client, pytest.raises(
-            UnsafeUrlError, match="Redirect loop"
+        with (
+            httpx.Client(follow_redirects=False) as client,
+            pytest.raises(UnsafeUrlError, match="Redirect loop"),
         ):
             _get_checked_response("http://public.test/start", client)
 
@@ -105,8 +106,9 @@ def test_redirect_limit_is_rejected() -> None:
             router.get(f"http://public.test/{index}").mock(
                 Response(302, headers={"location": f"/{index + 1}"})
             )
-        with httpx.Client(follow_redirects=False) as client, pytest.raises(
-            UnsafeUrlError, match="Redirect limit"
+        with (
+            httpx.Client(follow_redirects=False) as client,
+            pytest.raises(UnsafeUrlError, match="Redirect limit"),
         ):
             _get_checked_response("http://public.test/0", client)
 
@@ -195,3 +197,31 @@ def test_extract_ranked_articles_preserves_ranked_order(monkeypatch) -> None:
         )
     )
     assert [item.candidate_id for item in results] == ["a", "b"]
+
+
+def test_async_download_stops_at_limit_and_closes_stream() -> None:
+    class Body(httpx.AsyncByteStream):
+        closed = False
+        consumed = 0
+
+        async def __aiter__(self):
+            for _ in range(10):
+                self.consumed += 1
+                yield b"x" * 1024
+
+        async def aclose(self):
+            self.closed = True
+
+    body = Body()
+
+    async def run():
+        transport = httpx.MockTransport(lambda request: Response(200, stream=body))
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(UnsafeUrlError, match="size limit"):
+                await extract_module._get_checked_response_async(
+                    "http://public.test/large", client, max_bytes=2048
+                )
+
+    asyncio.run(run())
+    assert body.consumed == 3
+    assert body.closed

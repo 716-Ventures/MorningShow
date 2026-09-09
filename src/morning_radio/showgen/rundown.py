@@ -42,7 +42,9 @@ def build_rundown(
                     prompt_type="rundown",
                 )
                 candidate = recalculate_planned_seconds(response.rundown)
-                validation_errors = validate_rundown(candidate, profile, dossiers, target_minutes * 60)
+                validation_errors = validate_rundown(
+                    candidate, profile, dossiers, target_minutes * 60
+                )
                 if not validation_errors:
                     return _persist_rundown(candidate, run_dir)
             except (LLMError, ValidationError) as exc:
@@ -134,9 +136,13 @@ def validate_rundown(
             errors.append(f"segment {segment.segment_id} references unknown cluster ids: {unknown}")
         if segment.type == "story":
             if len(segment.cluster_ids) != 1:
-                errors.append(f"story segment {segment.segment_id} must reference exactly one cluster")
+                errors.append(
+                    f"story segment {segment.segment_id} must reference exactly one cluster"
+                )
             story_references.extend(segment.cluster_ids)
-    duplicates = sorted({cluster_id for cluster_id in story_references if story_references.count(cluster_id) > 1})
+    duplicates = sorted(
+        {cluster_id for cluster_id in story_references if story_references.count(cluster_id) > 1}
+    )
     if duplicates:
         errors.append(f"duplicate full-story cluster coverage: {duplicates}")
     missing = sorted(known - set(story_references))
@@ -148,7 +154,9 @@ def validate_rundown(
             f"planned_seconds {rundown.planned_seconds} does not equal segment sum {segment_sum}"
         )
     if rundown.target_seconds != target_seconds:
-        errors.append(f"target_seconds {rundown.target_seconds} does not equal requested {target_seconds}")
+        errors.append(
+            f"target_seconds {rundown.target_seconds} does not equal requested {target_seconds}"
+        )
     lower, upper = duration_bounds(profile, target_seconds)
     if not lower <= segment_sum <= upper:
         errors.append(f"planned duration {segment_sum} is outside allowed range {lower}-{upper}")
@@ -167,7 +175,9 @@ def recalculate_planned_seconds(rundown: Rundown) -> Rundown:
     )
 
 
-def fit_rundown_to_target(rundown: Rundown, profile: EditorialProfile, target_seconds: int) -> Rundown:
+def fit_rundown_to_target(
+    rundown: Rundown, profile: EditorialProfile, target_seconds: int
+) -> Rundown:
     segment_sum = sum(segment.planned_seconds for segment in rundown.segments)
     lower, upper = duration_bounds(profile, target_seconds)
     if lower <= segment_sum <= upper:
@@ -175,7 +185,9 @@ def fit_rundown_to_target(rundown: Rundown, profile: EditorialProfile, target_se
     story_segments = [segment for segment in rundown.segments if segment.type == "story"]
     if not story_segments:
         return recalculate_planned_seconds(rundown)
-    fixed_seconds = sum(segment.planned_seconds for segment in rundown.segments if segment.type != "story")
+    fixed_seconds = sum(
+        segment.planned_seconds for segment in rundown.segments if segment.type != "story"
+    )
     story_budget = max(45 * len(story_segments), min(upper, target_seconds) - fixed_seconds)
     per_story = max(45, round(story_budget / len(story_segments)))
     updated_segments = [

@@ -42,7 +42,9 @@ class FailingSameEventLLM:
         raise LLMInvalidResponseError("missing same_event")
 
 
-def candidate(candidate_id: str, title: str, *, published_at: datetime | None = None) -> CandidateStory:
+def candidate(
+    candidate_id: str, title: str, *, published_at: datetime | None = None
+) -> CandidateStory:
     return CandidateStory(
         candidate_id=candidate_id,
         feed_id="feed",

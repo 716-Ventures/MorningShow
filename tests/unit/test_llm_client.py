@@ -2,16 +2,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import respx
 from httpx import Response
 from pydantic import BaseModel, HttpUrl
 
-from morning_radio.llm.client import OllamaClient
+from morning_radio.llm.client import LLMInvalidResponseError, OllamaClient
 from morning_radio.settings import LLMSettings
 
 
 class TinyResponse(BaseModel):
     answer: str
+
+
+@pytest.mark.parametrize("payload", [[], {"response": None}, {"response": 123}])
+def test_malformed_envelope_has_typed_error(tmp_path: Path, payload) -> None:
+    client = OllamaClient(
+        LLMSettings(base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5),
+        tmp_path,
+    )
+    try:
+        with respx.mock(base_url="http://ollama.test") as router:
+            router.post("/api/generate").mock(Response(200, json=payload))
+            with pytest.raises(LLMInvalidResponseError):
+                client.generate_text("system", "user", stage="writing", prompt_type="test")
+    finally:
+        client.close()
 
 
 def test_structured_generation_retries_after_invalid_json(tmp_path: Path) -> None:

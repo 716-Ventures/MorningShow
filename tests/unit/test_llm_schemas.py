@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from morning_radio.llm.schemas import DossierResponse, RundownResponse, SameEventDecision
+
+
+def test_same_event_negation_is_not_a_merge() -> None:
+    assert not SameEventDecision.model_validate({"decision": "not the same event"}).same_event
+    with pytest.raises(ValidationError):
+        SameEventDecision.model_validate({"decision": "maybe the same event"})
 
 
 def test_rundown_response_repairs_model_arithmetic() -> None:

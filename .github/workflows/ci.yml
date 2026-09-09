@@ -18,7 +18,9 @@ jobs:
       - name: Check lockfile
         run: uv lock --check
       - name: Sync
-        run: uv sync --all-extras --dev
+        run: uv sync --locked --all-extras --dev
+      - name: Formatting
+        run: uv run ruff format --check .
       - name: Lint
         run: uv run ruff check .
       - name: Type check

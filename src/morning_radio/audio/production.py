@@ -191,7 +191,8 @@ def build_text_production_plan(
                 if not bed_active:
                     raise ProductionPlanError("BED STOP appeared without an active bed.")
                 bed_active = False
-                plan.append(BedStopItem())
+                if not no_assets:
+                    plan.append(BedStopItem())
             else:
                 if bed_active:
                     raise ProductionPlanError("Nested beds are not supported.")
@@ -330,13 +331,19 @@ def resolve_asset(asset_dir: Path, name: str | None = None) -> Path | None:
     if name:
         if "/" in name or "\\" in name or ".." in Path(name).parts:
             raise ProductionPlanError(f"Invalid asset name: {name}")
-        candidates = list(root.glob(f"{name}.*"))
+        candidates = [path for path in root.iterdir() if path.stem == name] if root.exists() else []
     else:
         candidates = [path for path in root.iterdir() if path.is_file()] if root.exists() else []
     for candidate in sorted(candidates):
         resolved = candidate.resolve()
-        if not str(resolved).startswith(str(root)):
+        if not resolved.is_relative_to(root):
             raise ProductionPlanError(f"Asset escapes configured directory: {candidate}")
-        if resolved.suffix.lower() in {".wav", ".mp3", ".m4a", ".aiff", ".aac"}:
+        if resolved.is_file() and resolved.suffix.lower() in {
+            ".wav",
+            ".mp3",
+            ".m4a",
+            ".aiff",
+            ".aac",
+        }:
             return resolved
     return None

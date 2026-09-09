@@ -12,9 +12,32 @@ from morning_radio.audio.production import (
     attach_audio_to_plan,
     build_production_plan,
     build_text_production_plan,
+    resolve_asset,
 )
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import ProductionSettings
+
+
+def test_asset_symlink_cannot_escape_to_sibling_directory(tmp_path: Path) -> None:
+    root = tmp_path / "assets"
+    sibling = tmp_path / "assets-private"
+    root.mkdir()
+    sibling.mkdir()
+    (sibling / "secret.wav").write_bytes(b"audio")
+    (root / "bed.wav").symlink_to(sibling / "secret.wav")
+    with pytest.raises(ProductionPlanError, match="escapes"):
+        resolve_asset(root, "bed")
+
+
+def test_no_assets_removes_every_asset_event(tmp_path: Path) -> None:
+    plan = build_text_production_plan(
+        "[BED: bed]\n[HOST]\nHello.\n[BED: STOP]\n",
+        tmp_path,
+        True,
+        production_settings(),
+        tmp_path / "assets",
+    )
+    assert [item.type for item in plan] == ["speech"]
 
 
 def production_settings() -> ProductionSettings:

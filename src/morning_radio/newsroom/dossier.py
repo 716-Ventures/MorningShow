@@ -135,11 +135,7 @@ def build_dossiers(
         safe = bool(facts)
         fact_claims = [fact.claim for fact in facts]
         fallback_source_ids = sorted(
-            {
-                candidate_id
-                for fact in facts
-                for candidate_id in fact.supporting_candidate_ids
-            }
+            {candidate_id for fact in facts for candidate_id in fact.supporting_candidate_ids}
         )
         dossier = StoryDossier(
             cluster_id=cluster.cluster_id,
@@ -156,7 +152,9 @@ def build_dossiers(
             source_ids=fallback_source_ids,
             safe_for_scripting=safe,
         )
-        atomic_write_json(dossier_dir / f"{cluster.cluster_id}.json", dossier.model_dump(mode="json"))
+        atomic_write_json(
+            dossier_dir / f"{cluster.cluster_id}.json", dossier.model_dump(mode="json")
+        )
         if safe:
             duplicate = _find_duplicate_dossier(dossier, dossiers)
             if duplicate is None:
@@ -169,7 +167,9 @@ def build_dossiers(
                     }
                 )
         else:
-            rejections.append({"cluster_id": cluster.cluster_id, "reason": "no_usable_source_facts"})
+            rejections.append(
+                {"cluster_id": cluster.cluster_id, "reason": "no_usable_source_facts"}
+            )
     if not dossiers:
         raise RuntimeError("No selected story had enough source support for a dossier.")
     atomic_write_json(
@@ -184,7 +184,9 @@ def build_dossiers(
     return dossiers
 
 
-def selection_queues(selected: SelectionResult | list[SelectedStory]) -> tuple[list[SelectedStory], list[SelectedStory]]:
+def selection_queues(
+    selected: SelectionResult | list[SelectedStory],
+) -> tuple[list[SelectedStory], list[SelectedStory]]:
     if isinstance(selected, SelectionResult):
         return selected.selected, selected.not_selected_high_score
     return selected, []
@@ -199,9 +201,7 @@ def _valid_source_ids(dossier: StoryDossier, known_ids: set[str]) -> bool:
         if not dossier.facts or not dossier.source_ids:
             return False
         fact_ids = {
-            candidate_id
-            for fact in dossier.facts
-            for candidate_id in fact.supporting_candidate_ids
+            candidate_id for fact in dossier.facts for candidate_id in fact.supporting_candidate_ids
         }
         return fact_ids == set(dossier.source_ids)
     return True

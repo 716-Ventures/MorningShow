@@ -8,7 +8,13 @@ from rich.console import Console
 
 from morning_radio import db
 from morning_radio.artifacts.io import atomic_write_text
-from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback, build_llm_client
+from morning_radio.llm.client import (
+    LLMClient,
+    LLMError,
+    OllamaClient,
+    allows_fixture_fallback,
+    build_llm_client,
+)
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import FeedbackMemoryResponse
 from morning_radio.profile.compiler import memory_path
@@ -22,9 +28,12 @@ def record_feedback(
 ) -> None:
     base = root or repo_root()
     db_path = base / "data" / "app.db"
+    db.initialize(db_path)
     resolved_run = run_id or db.latest_completed_run(db_path)
     if resolved_run is None:
-        raise typer.BadParameter("No completed run found. Run ./show morning first or pass a run id.")
+        raise typer.BadParameter(
+            "No completed run found. Run ./show morning first or pass a run id."
+        )
     if not db.completed_run_exists(db_path, resolved_run):
         raise typer.BadParameter(f"Run id is not a completed run: {resolved_run}")
 
@@ -77,6 +86,9 @@ def update_editorial_memory(
         except (LLMError, ValidationError):
             if not allows_fixture_fallback(client):
                 raise
+        finally:
+            if llm is None and isinstance(client, OllamaClient):
+                client.close()
     return normalize_memory(previous.rstrip() + "\n" + fallback_memory_addition(answers))
 
 

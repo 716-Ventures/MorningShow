@@ -44,8 +44,8 @@ def _int(prompt: str, minimum: int, maximum: int, default: int) -> int:
 
 def run_interview(existing: EditorialProfile | None = None) -> EditorialProfile | None:
     base = existing or default_profile()
+    profile = _collect_profile(base, existing is not None)
     while True:
-        profile = _collect_profile(base, existing is not None)
         console.print(render_profile_summary(profile))
         answer = _choice("Confirm profile: yes, edit, or cancel", {"yes", "edit", "cancel"}, "yes")
         if answer == "cancel":
@@ -55,7 +55,7 @@ def run_interview(existing: EditorialProfile | None = None) -> EditorialProfile 
             save_profile(profile)
             console.print("[green]Wrote data/profile.json and data/profile.md[/green]")
             return profile
-        base = _targeted_edit(profile)
+        profile = _targeted_edit(profile)
 
 
 def _collect_profile(base: EditorialProfile, has_existing: bool) -> EditorialProfile:
@@ -121,7 +121,11 @@ def _collect_profile(base: EditorialProfile, has_existing: bool) -> EditorialPro
         if item:
             negative_preferences.append(item)
 
-    context_level = _choice("Desired depth: summary, context, or analysis", {"summary", "context", "analysis"}, base.editorial_style.context_level)
+    context_level = _choice(
+        "Desired depth: summary, context, or analysis",
+        {"summary", "context", "analysis"},
+        base.editorial_style.context_level,
+    )
     assume_familiarity = _confirm("Assume familiarity with high-priority subjects?", True)
     ongoing = _choice(
         "Ongoing-story policy: changes_only, brief_updates, or always_context",
@@ -138,8 +142,12 @@ def _collect_profile(base: EditorialProfile, has_existing: bool) -> EditorialPro
         minimum = target
         maximum = target
 
-    headline_open = _confirm("Include top-of-show headline rundown?", base.show_format.headline_open)
-    watch_list_close = _confirm("Include closing what-to-watch section?", base.show_format.watch_list_close)
+    headline_open = _confirm(
+        "Include top-of-show headline rundown?", base.show_format.headline_open
+    )
+    watch_list_close = _confirm(
+        "Include closing what-to-watch section?", base.show_format.watch_list_close
+    )
     host_count = _int("One host or two hosts?", 1, 2, base.show_format.host_count)
 
     profile = EditorialProfile.model_validate(
@@ -228,9 +236,20 @@ def _targeted_edit(profile: EditorialProfile) -> EditorialProfile:
         data["show_format"] = _collect_format(profile)
     elif category == "voice":
         data["voice_preferences"] = {
-            "primary_voice": _ask("Primary voice, blank for default", profile.voice_preferences.primary_voice or "") or None,
-            "secondary_voice": _ask("Secondary voice, blank for default", profile.voice_preferences.secondary_voice or "") or None,
-            "pace": _choice("Voice pace: slow, normal, or fast", {"slow", "normal", "fast"}, profile.voice_preferences.pace),
+            "primary_voice": _ask(
+                "Primary voice, blank for default", profile.voice_preferences.primary_voice or ""
+            )
+            or None,
+            "secondary_voice": _ask(
+                "Secondary voice, blank for default",
+                profile.voice_preferences.secondary_voice or "",
+            )
+            or None,
+            "pace": _choice(
+                "Voice pace: slow, normal, or fast",
+                {"slow", "normal", "fast"},
+                profile.voice_preferences.pace,
+            ),
         }
     return EditorialProfile.model_validate(data)
 
@@ -307,7 +326,11 @@ def _collect_format(base: EditorialProfile) -> dict:
         "minimum_minutes": minimum,
         "maximum_minutes": maximum,
         "allow_variable_length": variable,
-        "headline_open": _confirm("Include top-of-show headline rundown?", base.show_format.headline_open),
-        "watch_list_close": _confirm("Include closing what-to-watch section?", base.show_format.watch_list_close),
+        "headline_open": _confirm(
+            "Include top-of-show headline rundown?", base.show_format.headline_open
+        ),
+        "watch_list_close": _confirm(
+            "Include closing what-to-watch section?", base.show_format.watch_list_close
+        ),
         "host_count": _int("One host or two hosts?", 1, 2, base.show_format.host_count),
     }

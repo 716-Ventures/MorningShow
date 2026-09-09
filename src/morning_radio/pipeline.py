@@ -22,7 +22,7 @@ from morning_radio.audio.production import (
     write_production_plan,
 )
 from morning_radio.dependencies import morning_preflight
-from morning_radio.llm.client import LLMClient, build_llm_client
+from morning_radio.llm.client import LLMClient, OllamaClient, build_llm_client
 from morning_radio.models import (
     CandidateStory,
     EditorialProfile,
@@ -65,6 +65,8 @@ def run_morning(
     no_assets: bool = False,
     root: Path | None = None,
 ) -> RunMorningResult:
+    if minutes is not None and not 5 <= minutes <= 90:
+        raise ValueError("Episode minutes must be between 5 and 90.")
     root = root or repo_root()
     db.initialize(root / "data" / "app.db")
     profile = load_profile(root)
@@ -97,6 +99,9 @@ def run_morning(
             failed_stage=context.record.failed_stage or context.record.status.value,
             action=stage_action(context.record.failed_stage or context.record.status.value),
         ) from exc
+    finally:
+        if isinstance(llm, OllamaClient):
+            llm.close()
 
 
 def _run_pipeline(

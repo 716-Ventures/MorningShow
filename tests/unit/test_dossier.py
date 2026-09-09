@@ -61,16 +61,16 @@ def test_safe_dossier_rejects_empty_fact_citations() -> None:
 def test_safe_dossier_rejects_unknown_fact_source_id() -> None:
     with pytest.raises(ValidationError):
         StoryDossier.model_validate(
-            _dossier_payload(
-                facts=[{"claim": "Fact.", "supporting_candidate_ids": ["missing"]}]
-            )
+            _dossier_payload(facts=[{"claim": "Fact.", "supporting_candidate_ids": ["missing"]}])
         )
 
 
 def test_safe_dossier_rejects_blank_fact() -> None:
     with pytest.raises(ValidationError):
         StoryDossier.model_validate(
-            _dossier_payload(facts=[{"claim": "   ", "supporting_candidate_ids": ["candidate-001"]}])
+            _dossier_payload(
+                facts=[{"claim": "   ", "supporting_candidate_ids": ["candidate-001"]}]
+            )
         )
 
 
@@ -218,7 +218,7 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             candidate_ids=["candidate-002"],
             source_count=1,
             fingerprint="second-fallback",
-        )
+        ),
     ]
     extractions = [
         ExtractionResult(
@@ -236,7 +236,7 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             text="Second source sentence. More source text follows.",
             word_count=8,
             extraction_status="usable",
-        )
+        ),
     ]
     selected = [
         SelectedStory(
@@ -250,7 +250,7 @@ def test_recoverable_dossier_model_error_uses_grounded_fallback(tmp_path) -> Non
             reason="selected",
             estimated_seconds=60,
             score=85,
-        )
+        ),
     ]
 
     dossiers = build_dossiers(selected, clusters, extractions, tmp_path, llm)

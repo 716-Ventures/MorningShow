@@ -136,9 +136,14 @@ async def fetch_feed(
 ) -> tuple[FeedConfig, bytes | None, str | None]:
     async with semaphore:
         try:
-            response = await client.get(str(feed.url))
-            response.raise_for_status()
-            return feed, response.content, None
+            async with client.stream("GET", str(feed.url)) as response:
+                response.raise_for_status()
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > 5_000_000:
+                        raise ValueError("Feed exceeded 5 MB decoded size limit")
+                    content.extend(chunk)
+                return feed, bytes(content), None
         except (httpx.HTTPError, ValueError) as exc:
             return feed, None, str(exc)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -9,6 +10,18 @@ import pytest
 from morning_radio import db
 from morning_radio.artifacts.runs import RunTransitionError, create_run, generate_run_id
 from morning_radio.models import StageStatus
+
+
+def test_database_context_closes_and_rolls_back(tmp_path: Path) -> None:
+    path = tmp_path / "test.db"
+    db.initialize(path)
+    with pytest.raises(RuntimeError), db.connect(path) as connection:
+        connection.execute("INSERT INTO schema_migrations VALUES (2, 'test')")
+        raise RuntimeError("rollback")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    with db.connect(path) as connection:
+        assert db.latest_migration_version(connection) == 1
 
 
 def test_run_ids_match_format_and_are_unique() -> None:
