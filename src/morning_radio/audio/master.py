@@ -220,15 +220,19 @@ def normalize_audio(
     trim_leading: bool = False,
     trim_trailing: bool = False,
 ) -> None:
-    audio_filter = silence_trim_filter(leading=trim_leading, trailing=trim_trailing)
-    filter_args = ["-af", audio_filter] if audio_filter is not None else []
+    filters = [
+        silence_trim_filter(leading=trim_leading, trailing=trim_trailing),
+        loudness_filter(production),
+    ]
+    audio_filter = ",".join(item for item in filters if item is not None)
     run_command(
         [
             ffmpeg,
             "-y",
             "-i",
             str(source),
-            *filter_args,
+            "-af",
+            audio_filter,
             "-ar",
             str(production.audio.sample_rate_hz),
             "-ac",
@@ -263,6 +267,10 @@ def silence_trim_filter(*, leading: bool, trailing: bool) -> str | None:
     return ",".join(filters) or None
 
 
+def loudness_filter(production: ProductionSettings) -> str:
+    return f"loudnorm=I={production.audio.loudness_target_lufs}:TP=-1.5:LRA=11"
+
+
 def mix_bed_under_speech(
     ffmpeg: str,
     speech: Path,
@@ -274,7 +282,11 @@ def mix_bed_under_speech(
     trim_speech_leading: bool = False,
 ) -> None:
     layout = "mono" if production.audio.channels == 1 else "stereo"
-    speech_filter = silence_trim_filter(leading=trim_speech_leading, trailing=False) or "anull"
+    speech_filters = [
+        silence_trim_filter(leading=trim_speech_leading, trailing=False),
+        loudness_filter(production),
+    ]
+    speech_filter = ",".join(item for item in speech_filters if item is not None)
     run_command(
         [
             ffmpeg,

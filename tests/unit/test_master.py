@@ -9,6 +9,7 @@ from morning_radio.audio.master import (
     AudioMasterError,
     coerce_production_plan,
     escape_concat_path,
+    loudness_filter,
     metadata_args,
     mix_and_master,
     mix_bed_under_speech,
@@ -273,7 +274,8 @@ def test_normalize_audio_preserves_boundaries_by_default(
     )
 
     command = commands[0]
-    assert "-af" not in command
+    audio_filter = command[command.index("-af") + 1]
+    assert audio_filter == loudness_filter(production_settings())
 
 
 def test_normalize_audio_can_trim_trailing_boundary(
@@ -296,7 +298,8 @@ def test_normalize_audio_can_trim_trailing_boundary(
 
     command = commands[0]
     audio_filter = command[command.index("-af") + 1]
-    assert audio_filter == silence_trim_filter(leading=False, trailing=True)
+    trailing_filter = silence_trim_filter(leading=False, trailing=True)
+    assert audio_filter == f"{trailing_filter},{loudness_filter(production_settings())}"
     assert audio_filter.count("silenceremove=") == 1
     assert "areverse" in audio_filter
 
@@ -321,7 +324,7 @@ def test_bed_mix_preserves_speech_boundaries_by_default(
 
     command = commands[0]
     audio_filter = command[command.index("-filter_complex") + 1]
-    assert "[0:a]anull[speech]" in audio_filter
+    assert f"[0:a]{loudness_filter(production_settings())}[speech]" in audio_filter
     assert "[speech][bed]amix=" in audio_filter
 
 
@@ -347,7 +350,7 @@ def test_bed_mix_can_trim_leading_speech_boundary(
     command = commands[0]
     audio_filter = command[command.index("-filter_complex") + 1]
     leading_filter = silence_trim_filter(leading=True, trailing=False)
-    assert f"[0:a]{leading_filter}[speech]" in audio_filter
+    assert f"[0:a]{leading_filter},{loudness_filter(production_settings())}[speech]" in audio_filter
 
 
 def test_run_command_writes_stderr_diagnostics(tmp_path: Path) -> None:
