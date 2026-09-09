@@ -415,6 +415,30 @@ def test_large_verification_checks_every_passage_and_whole_script(tmp_path: Path
     assert llm.payloads[3]["script"] == script
 
 
+def test_passage_verification_retains_show_date(tmp_path: Path) -> None:
+    from morning_radio.showgen.verify import _verify_passages
+
+    rundown = Rundown(
+        show_date=date(2026, 9, 9),
+        target_seconds=300,
+        planned_seconds=300,
+        segments=[
+            RundownSegment(
+                segment_id="open",
+                type="opening",
+                title="Opening",
+                planned_seconds=300,
+                purpose="test",
+            )
+        ],
+    )
+    llm = PassageLLM()
+    _verify_passages(
+        "[HOST]\nApple released details.\n", large_dossiers(), [], tmp_path, llm, 0, None, rundown
+    )
+    assert llm.payloads[0]["show_date"] == "2026-09-09"
+
+
 def test_one_unavailable_passage_blocks_whole_episode(tmp_path: Path) -> None:
     llm = PassageLLM(fail_at=2)
     result = verify_script(

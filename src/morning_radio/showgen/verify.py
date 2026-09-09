@@ -207,6 +207,7 @@ def _verify_passages(
             {
                 "task": "Verify every claim in this passage against source_evidence. Dossiers are not independent evidence. Ordinary greetings need no citation. Return corrections for this passage only, under its host marker.",
                 "script": f"[{host}]\n{text}\n",
+                "show_date": rundown.show_date.isoformat() if rundown is not None else None,
                 "dossiers": [item.model_dump(mode="json") for item in relevant],
                 "source_evidence": compact_source_evidence(relevant, extractions),
                 "correction_cycle": cycle,
