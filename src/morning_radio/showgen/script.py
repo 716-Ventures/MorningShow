@@ -118,11 +118,15 @@ def write_script(
                 stage="writing",
                 prompt_type="script",
             )
-            script = normalize_script_format(response.script)
+            script = finalize_script(response.script, profile, dossiers)
             validate_script(script)
             validate_script_quality(script, rundown, dossiers)
+            validate_production_directives(script, profile, dossiers)
             script = adjust_script_duration_if_needed(script, rundown, llm)
+            script = finalize_script(script, profile, dossiers)
+            validate_script(script)
             validate_script_quality(script, rundown, dossiers)
+            validate_production_directives(script, profile, dossiers)
             atomic_write_text(run_dir / "script-draft.md", script)
             return script
         except (LLMError, ScriptError, ValidationError) as exc:
@@ -135,7 +139,10 @@ def write_script(
                 },
             )
     dossier_by_id = {item.cluster_id: item for item in dossiers}
-    lines = ["[MUSIC: OPENING]", "[HOST]"]
+    lines = ["[MUSIC: OPENING]"]
+    if dossiers:
+        lines.append("[BED: bed]")
+    lines.append("[HOST]")
     lines.append(
         f"Good morning. This is your personal morning radio for {rundown.show_date.strftime('%B %-d, %Y')}."
     )
@@ -149,17 +156,22 @@ def write_script(
             continue
         story_index += 1
         dossier = dossier_by_id[segment.cluster_ids[0]]
-        lines.extend(["[HOST]", story_script_paragraph(dossier, story_index)])
+        if story_index == 1:
+            lines.extend(["[BED: STOP]", "[BUMPER: Headlines]"])
+        else:
+            lines.append("[BUMPER: bumper]")
+        lines.extend(["[HOST]", story_script_paragraph(dossier)])
         caution = uncertainty_sentence(dossier.uncertainties)
         if caution:
             lines.append(caution)
         lines.append("[PAUSE: 650]")
     if profile.show_format.watch_list_close:
-        lines.extend(["[HOST]", watch_list_sentence(dossiers)])
+        lines.extend(["[BUMPER: What to Watch]", "[HOST]", watch_list_sentence(dossiers)])
     lines.extend(["[HOST]", "That's the show for now. Have a good morning.", "[MUSIC: CLOSING]"])
     script = "\n\n".join(lines) + "\n"
     validate_script(script)
     validate_script_quality(script, rundown, dossiers)
+    validate_production_directives(script, profile, dossiers)
     atomic_write_text(run_dir / "script-draft.md", script)
     return script
 
@@ -215,6 +227,153 @@ def normalize_script_format(script: str) -> str:
     return "\n".join(normalized_lines).strip() + "\n"
 
 
+def finalize_script(
+    script: str,
+    profile: EditorialProfile,
+    dossiers: list[StoryDossier],
+) -> str:
+    normalized = normalize_script_format(script)
+    without_headlines = remove_story_headline_leads(normalized, dossiers)
+    return add_standard_production_directives(without_headlines, profile, dossiers)
+
+
+def remove_story_headline_leads(script: str, dossiers: list[StoryDossier]) -> str:
+    titles = sorted(
+        (clean_spoken_copy(dossier.working_headline) for dossier in dossiers),
+        key=len,
+        reverse=True,
+    )
+    cleaned_lines: list[str] = []
+    for raw_line in script.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("["):
+            cleaned_lines.append(raw_line)
+            continue
+        for transition in STORY_TRANSITIONS:
+            prefix = f"{transition}:"
+            if line.casefold().startswith(prefix.casefold()):
+                line = line[len(prefix) :].lstrip()
+                break
+        for title in titles:
+            if not line.casefold().startswith(title.casefold()):
+                continue
+            remainder = line[len(title) :]
+            if remainder and remainder[0] not in " .:!?-":
+                continue
+            line = remainder.lstrip(" .:!?-")
+            break
+        if line:
+            cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip() + "\n"
+
+
+def add_standard_production_directives(
+    script: str,
+    profile: EditorialProfile,
+    dossiers: list[StoryDossier],
+) -> str:
+    tokens = [
+        line.strip()
+        for line in script.splitlines()
+        if line.strip()
+        and not line.strip().startswith("[BUMPER:")
+        and not line.strip().startswith("[BED:")
+    ]
+    if not dossiers:
+        return "\n\n".join(tokens) + "\n"
+
+    matching_script = "\n\n".join(tokens) + "\n"
+    story_sections = _match_story_sections(matching_script, dossiers)
+    section_indexes = {
+        cluster_id: tokens.index(section)
+        for cluster_id, section in story_sections.items()
+        if section in tokens
+    }
+    ordered_story_indexes = sorted(section_indexes.values())
+    if not ordered_story_indexes:
+        return matching_script
+
+    insert_before: dict[int, list[str]] = {}
+    insert_after: dict[int, list[str]] = {}
+    opening_index = next(
+        (index for index, item in enumerate(tokens) if item == "[MUSIC: OPENING]"),
+        None,
+    )
+    if opening_index is not None:
+        insert_after[opening_index] = ["[BED: bed]"]
+
+    for story_number, story_index in enumerate(ordered_story_indexes):
+        marker_index = preceding_host_index(tokens, story_index)
+        directives = (
+            ["[BED: STOP]", "[BUMPER: Headlines]"] if story_number == 0 else ["[BUMPER: bumper]"]
+        )
+        insert_before.setdefault(marker_index, []).extend(directives)
+
+    if profile.show_format.watch_list_close:
+        closing_index = next(
+            (index for index, item in enumerate(tokens) if item == "[MUSIC: CLOSING]"),
+            len(tokens),
+        )
+        candidates = [
+            index
+            for index in range(ordered_story_indexes[-1] + 1, closing_index)
+            if not tokens[index].startswith("[")
+            and not tokens[index].casefold().startswith(("that's the show", "that is the show"))
+        ]
+        if candidates:
+            marker_index = preceding_host_index(tokens, candidates[0])
+            insert_before.setdefault(marker_index, []).append("[BUMPER: What to Watch]")
+
+    output: list[str] = []
+    for index, item in enumerate(tokens):
+        output.extend(insert_before.get(index, []))
+        output.append(item)
+        output.extend(insert_after.get(index, []))
+    return "\n\n".join(output) + "\n"
+
+
+def preceding_host_index(tokens: list[str], spoken_index: int) -> int:
+    if spoken_index > 0 and tokens[spoken_index - 1] in {"[HOST]", "[HOST 2]"}:
+        return spoken_index - 1
+    return spoken_index
+
+
+def validate_story_openings(script: str, dossiers: list[StoryDossier]) -> None:
+    titles = [clean_spoken_copy(dossier.working_headline).casefold() for dossier in dossiers]
+    for _host, text in spoken_blocks(script):
+        lowered = text.casefold()
+        if any(lowered.startswith(f"{transition.casefold()}:") for transition in STORY_TRANSITIONS):
+            raise ScriptError("Story copy may not begin with a headline-style transition.")
+        if any(
+            lowered.startswith(title)
+            and (len(lowered) == len(title) or lowered[len(title)] in " .:!?-")
+            for title in titles
+        ):
+            raise ScriptError("Story copy may not begin by reading its headline.")
+
+
+def validate_production_directives(
+    script: str,
+    profile: EditorialProfile,
+    dossiers: list[StoryDossier],
+) -> None:
+    if not dossiers:
+        return
+    required_counts = {
+        "[BED: bed]": 1,
+        "[BED: STOP]": 1,
+        "[BUMPER: Headlines]": 1,
+        "[BUMPER: bumper]": max(0, len(dossiers) - 1),
+        "[BUMPER: What to Watch]": int(profile.show_format.watch_list_close),
+    }
+    for directive, expected in required_counts.items():
+        actual = sum(line.strip() == directive for line in script.splitlines())
+        if actual != expected:
+            raise ScriptError(
+                f"Production directive {directive} appeared {actual} times; expected {expected}."
+            )
+
+
 def validate_script_quality(
     script: str,
     rundown: Rundown,
@@ -222,6 +381,7 @@ def validate_script_quality(
 ) -> None:
     if not dossiers:
         return
+    validate_story_openings(script, dossiers)
     spoken_words = sum(len(re.findall(r"\b[\w']+\b", text)) for _, text in spoken_blocks(script))
     minimum_words = len(dossiers) * MIN_WORDS_PER_STORY
     if spoken_words < minimum_words:
@@ -255,19 +415,18 @@ def validate_script_quality(
             )
 
 
-def story_script_paragraph(dossier: StoryDossier, story_index: int) -> str:
+def story_script_paragraph(dossier: StoryDossier) -> str:
     title = clean_spoken_copy(dossier.working_headline)
     what_happened = remove_redundant_lead(clean_spoken_copy(dossier.what_happened), title)
     what_is_new = meaningful_dossier_copy(dossier.what_is_new_today)
     why_it_matters = meaningful_dossier_copy(dossier.why_it_matters)
-    transition = STORY_TRANSITIONS[min(story_index - 1, len(STORY_TRANSITIONS) - 1)]
     details = _distinct_sentences([what_happened, what_is_new, why_it_matters], title)
     if sum(len(sentence.split()) for sentence in details) < 80:
         details = _distinct_sentences(
             [*details, *(clean_spoken_copy(fact.claim) for fact in dossier.facts)],
             title,
         )
-    return " ".join([f"{transition}: {title}.", *details])
+    return " ".join(details)
 
 
 def _distinct_sentences(candidates: list[str], title: str) -> list[str]:
@@ -315,24 +474,16 @@ def _match_story_sections(
     available = set(range(len(sections)))
     matches: dict[str, str] = {}
     for dossier in dossiers:
-        required_overlap = min(
-            2,
-            len(
-                {
-                    word.casefold()
-                    for word in re.findall(r"[A-Za-z0-9']+", dossier.working_headline)
-                    if len(word) >= 4
-                }
-            ),
-        )
+        reference_terms = _dossier_reference_terms(dossier)
+        required_overlap = min(2, len(reference_terms))
         ranked = sorted(
             available,
-            key=lambda index: _title_overlap(dossier.working_headline, sections[index]),
+            key=lambda index: _reference_overlap(reference_terms, sections[index]),
             reverse=True,
         )
         if (
             not ranked
-            or _title_overlap(dossier.working_headline, sections[ranked[0]]) < required_overlap
+            or _reference_overlap(reference_terms, sections[ranked[0]]) < required_overlap
         ):
             continue
         best_index = ranked[0]
@@ -341,12 +492,14 @@ def _match_story_sections(
     return matches
 
 
-def _title_overlap(title: str, text: str) -> int:
-    title_words = {
-        word.casefold() for word in re.findall(r"[A-Za-z0-9']+", title) if len(word) >= 4
-    }
+def _dossier_reference_terms(dossier: StoryDossier) -> set[str]:
+    reference = f"{dossier.working_headline} {dossier.what_happened}"
+    return {word.casefold() for word in re.findall(r"[A-Za-z0-9']+", reference) if len(word) >= 4}
+
+
+def _reference_overlap(reference_terms: set[str], text: str) -> int:
     text_words = {word.casefold() for word in re.findall(r"[A-Za-z0-9']+", text)}
-    return len(title_words & text_words)
+    return len(reference_terms & text_words)
 
 
 def meaningful_dossier_copy(text: str) -> str:

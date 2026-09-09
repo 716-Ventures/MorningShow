@@ -107,21 +107,21 @@ class InvalidCorrectionLLM:
     def generate_structured(self, *args, **kwargs):
         response_model = args[2]
         return response_model.model_validate(
-                {
-                    "verification": {
-                        "status": "fail",
-                        "issues": [
-                            {
-                                "severity": "high",
-                                "category": "unsupported_claim",
-                                "script_excerpt": "Draft script.",
-                                "explanation": "Rewrite required.",
-                                "supporting_source_ids": [],
-                                "required_action": "rewrite",
-                            }
-                        ],
-                        "corrected_script_required": True,
-                    },
+            {
+                "verification": {
+                    "status": "fail",
+                    "issues": [
+                        {
+                            "severity": "high",
+                            "category": "unsupported_claim",
+                            "script_excerpt": "Draft script.",
+                            "explanation": "Rewrite required.",
+                            "supporting_source_ids": [],
+                            "required_action": "rewrite",
+                        }
+                    ],
+                    "corrected_script_required": True,
+                },
                 "corrected_script": "Spoken copy without a host marker.\n",
             }
         )
@@ -343,4 +343,4 @@ def test_verification_prompt_compacts_long_source_evidence(tmp_path: Path) -> No
 
 def substantive_script() -> str:
     words = " ".join(["context"] * 60)
-    return f"[HOST]\nStory. {words}.\n"
+    return f"[HOST]\nFact. This story has {words}.\n"

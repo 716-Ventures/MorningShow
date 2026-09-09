@@ -21,6 +21,7 @@ from morning_radio.models import (
 from morning_radio.showgen.script import (
     ScriptError,
     estimate_spoken_seconds,
+    finalize_script,
     normalize_script_format,
     spoken_blocks,
     validate_script,
@@ -233,8 +234,12 @@ def test_fallback_script_uses_radio_copy_instead_of_dossier_labels(tmp_path) -> 
     assert "One caution:" not in script
     assert "Single-source story" not in script
     assert "Published" not in script
-    assert script.count("UN votes to adopt new world map to reflect Africa's true size") == 1
+    assert "UN votes to adopt new world map to reflect Africa's true size" not in script
     assert "The UN General Assembly has voted to replace the traditional world map." in script
+    assert "[BED: bed]" in script
+    assert "[BED: STOP]" in script
+    assert "[BUMPER: Headlines]" in script
+    assert "[BUMPER: What to Watch]" in script
 
 
 def test_upstream_model_fallback_does_not_skip_script_llm(tmp_path) -> None:
@@ -256,5 +261,50 @@ def test_script_quality_rejects_headline_reader_copy() -> None:
         "Artificial intelligence developer tools. The company released a new system.\n"
     )
 
-    with pytest.raises(ScriptError, match="too shallow"):
+    with pytest.raises(ScriptError, match="headline"):
         validate_script_quality(shallow, rundown(), [dossier()])
+
+
+def test_finalize_script_removes_story_titles_and_places_all_asset_classes() -> None:
+    second = dossier().model_copy(
+        update={
+            "cluster_id": "cluster-002",
+            "working_headline": "Cloud platform release",
+            "what_happened": "The company released a cloud platform for software teams.",
+        }
+    )
+    raw = """[MUSIC: OPENING]
+
+[HOST]
+Good morning. Two stories are coming up.
+
+[HOST]
+First up: Artificial intelligence developer tools. The company released a new artificial intelligence system for software developers.
+
+[PAUSE: 650]
+
+[HOST]
+Also this morning: Cloud platform release. The company released a cloud platform for software teams.
+
+[PAUSE: 650]
+
+[HOST]
+I'll keep an eye on these stories.
+
+[HOST]
+That's the show for now. Have a good morning.
+
+[MUSIC: CLOSING]
+"""
+
+    script = finalize_script(raw, profile(), [dossier(), second])
+
+    assert "First up:" not in script
+    assert "Also this morning:" not in script
+    assert "Artificial intelligence developer tools." not in script
+    assert "Cloud platform release." not in script
+    assert script.count("[BED: bed]") == 1
+    assert script.count("[BED: STOP]") == 1
+    assert script.count("[BUMPER: Headlines]") == 1
+    assert script.count("[BUMPER: bumper]") == 1
+    assert script.count("[BUMPER: What to Watch]") == 1
