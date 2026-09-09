@@ -26,6 +26,9 @@ from morning_radio.showgen.script import (
     normalize_script_format,
     remove_redundant_lead,
     spoken_blocks,
+    spoken_word_count,
+    story_script_paragraph,
+    story_word_limit,
     validate_script,
     validate_script_quality,
     write_script,
@@ -220,6 +223,35 @@ def test_recoverable_script_model_error_uses_fallback(tmp_path) -> None:
     diagnostic = (tmp_path / "logs" / "script-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "timed out" in diagnostic
+
+
+def test_fallback_fits_short_story_and_preserves_uncertainty(tmp_path) -> None:
+    short_rundown = rundown()
+    for segment in short_rundown.segments:
+        if segment.type == "story":
+            segment.planned_seconds = 30
+    source = dossier().model_copy(update={"uncertainties": ["Availability is not confirmed."]})
+    script = write_script(profile(), short_rundown, [source], tmp_path, FailingScriptLLM())
+    sections = [text for _, text in spoken_blocks(script) if "One note of caution:" in text]
+    assert len(sections) == 1
+    assert "Availability is not confirmed." in sections[0]
+    assert spoken_word_count(sections[0]) <= story_word_limit(30)
+    assert sections[0].endswith(".")
+    validate_script_quality(script, short_rundown, [source])
+
+
+def test_fallback_does_not_clip_or_skip_an_oversized_lead() -> None:
+    with pytest.raises(ScriptError, match="lead and its cautions"):
+        story_script_paragraph(dossier(), maximum_words=2)
+
+
+def test_fallback_word_budget_keeps_complete_sentence_prefix() -> None:
+    source = dossier()
+    full = story_script_paragraph(source)
+    fitted = story_script_paragraph(source, maximum_words=70)
+    assert full.startswith(fitted)
+    assert fitted.endswith(".")
+    assert spoken_word_count(fitted) <= 70
 
 
 def test_fallback_script_uses_radio_copy_instead_of_dossier_labels(tmp_path) -> None:

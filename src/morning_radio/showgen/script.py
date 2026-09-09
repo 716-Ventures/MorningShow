@@ -160,8 +160,10 @@ def write_script(
             lines.extend(["[BED: STOP]", "[BUMPER: Headlines]"])
         else:
             lines.append("[BUMPER: bumper]")
-        lines.extend(["[HOST]", story_script_paragraph(dossier)])
         caution = uncertainty_sentence(dossier.uncertainties)
+        maximum_words = story_word_limit(segment.planned_seconds)
+        caution_words = spoken_word_count(caution or "")
+        lines.extend(["[HOST]", story_script_paragraph(dossier, maximum_words - caution_words)])
         if caution:
             lines.append(caution)
         lines.append("[PAUSE: 650]")
@@ -401,7 +403,7 @@ def validate_script_quality(
                 f"Story {dossier.cluster_id} is too shallow: {section_words} spoken words."
             )
         planned_seconds = segment_seconds.get(dossier.cluster_id, dossier.recommended_seconds)
-        maximum_words = max(100, round(planned_seconds * DEFAULT_WPM / 60 * 1.15))
+        maximum_words = story_word_limit(planned_seconds)
         if section_words > maximum_words:
             raise ScriptError(
                 f"Story {dossier.cluster_id} is too long: {section_words} spoken words; "
@@ -409,7 +411,15 @@ def validate_script_quality(
             )
 
 
-def story_script_paragraph(dossier: StoryDossier) -> str:
+def spoken_word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w']+\b", text))
+
+
+def story_word_limit(planned_seconds: float) -> int:
+    return max(100, round(planned_seconds * DEFAULT_WPM / 60 * 1.15))
+
+
+def story_script_paragraph(dossier: StoryDossier, maximum_words: int | None = None) -> str:
     title = clean_spoken_copy(dossier.working_headline)
     what_happened = clean_spoken_copy(
         remove_redundant_lead(dossier.what_happened, dossier.working_headline)
@@ -422,7 +432,20 @@ def story_script_paragraph(dossier: StoryDossier) -> str:
             [*details, *(clean_spoken_copy(fact.claim) for fact in dossier.facts)],
             title,
         )
-    return " ".join(details)
+    if maximum_words is None:
+        return " ".join(details)
+    # Reserve uncertainty copy in the caller; never clip a sentence or skip the lead.
+    fitted: list[str] = []
+    remaining = maximum_words
+    for sentence in details:
+        words = spoken_word_count(sentence)
+        if words > remaining:
+            break
+        fitted.append(sentence)
+        remaining -= words
+    if not fitted:
+        raise ScriptError("The grounded story lead and its cautions exceed the time budget.")
+    return " ".join(fitted)
 
 
 def _distinct_sentences(candidates: list[str], title: str) -> list[str]:
