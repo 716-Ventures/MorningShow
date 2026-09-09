@@ -178,6 +178,7 @@ def test_voice_preview_missing_key_is_actionable(monkeypatch, tmp_path):
 
     shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
     monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr("morning_radio.credentials.repo_root", lambda: tmp_path)
     monkeypatch.delenv("MORNING_RADIO_FAKE_TTS", raising=False)
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     result = CliRunner().invoke(app, ["voice-preview"])

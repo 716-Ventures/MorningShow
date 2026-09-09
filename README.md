@@ -38,18 +38,21 @@ unchanged.
 
 ### ElevenLabs Speech
 
-The committed configuration uses Voice ID `AkzTpEeeEWvyZf4umyCJ` (Nathaniel C) and `eleven_multilingual_v2`. Set your key in the same terminal that runs `./show`. In zsh, this prompts without echoing the key or putting its value into command history:
+The committed configuration uses Voice ID `AkzTpEeeEWvyZf4umyCJ` (Nathaniel C) and `eleven_multilingual_v2`. Put your key in `.env` at the project root (next to `show`):
 
-```zsh
-read -rs "ELEVENLABS_API_KEY?ElevenLabs API key: "
-printf '\n'
-export ELEVENLABS_API_KEY
+```dotenv
+ELEVENLABS_API_KEY=your-key-here
+```
+
+The file is loaded automatically, even when the command is launched from another directory. No shell export is needed. `.env.example` provides a blank template for new checkouts. Then run:
+
+```bash
 ./show voice-preview
 ```
 
 The preview prints a WAV path and does not run discovery, Ollama, or editorial verification. It uses ElevenLabs credits. `./show doctor` checks voice access without generating speech; the key needs Voices Read and Text to Speech permissions. Add Nathaniel C to My Voices if your account cannot access it. After the preview, run `./show morning` normally.
 
-Never put the key in YAML, a profile, a command argument, or Git. `.env` is ignored by Git but is **not automatically loaded**; this integration reads the environment only. The export above lasts for the current terminal session.
+Never put the key in YAML, a profile, a command argument, or Git. `.env` is Git-ignored; keep it private (file permissions `600`). An explicitly set environment variable takes precedence over the file, including an empty value; unset an old `ELEVENLABS_API_KEY` export to use the file. Credentials are read without modifying process environment or executing/interpolating file contents. Edits take effect on the next command.
 
 Only speech text is sent to ElevenLabs, not the profile or article source files. Hosted requests are billed and subject to ElevenLabs' retention policies; zero-retention mode is not enabled. Speech failures stop the episode, with no silent fallback or automatic paid-request retry. A timeout can occur after billing, so inspect account usage before retrying.
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 import wave
 from pathlib import Path
@@ -11,6 +10,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from morning_radio.audio.tts import TTSError, speech_hash
+from morning_radio.credentials import read_credential
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import TTSSettings
 
@@ -26,9 +26,11 @@ class VoiceInfo(BaseModel):
 
 class ElevenLabsTTS:
     def __init__(self, settings: TTSSettings, *, client: httpx.Client | None = None):
-        key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+        key = read_credential("ELEVENLABS_API_KEY")
         if not key:
-            raise TTSError("Set ELEVENLABS_API_KEY in your shell before using ElevenLabs.")
+            raise TTSError(
+                "Set ELEVENLABS_API_KEY in the project .env file before using ElevenLabs."
+            )
         self.settings = settings.elevenlabs
         self._voice_ids = list(
             dict.fromkeys(voice for voice in (settings.voice, settings.secondary_voice) if voice)

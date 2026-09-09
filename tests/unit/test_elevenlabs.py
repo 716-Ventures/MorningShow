@@ -17,7 +17,8 @@ VOICE = "AkzTpEeeEWvyZf4umyCJ"
 
 
 @pytest.fixture
-def settings(monkeypatch):
+def settings(monkeypatch, tmp_path):
+    monkeypatch.setattr("morning_radio.credentials.repo_root", lambda: tmp_path)
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-secret-never-log")
     monkeypatch.delenv("MORNING_RADIO_FAKE_TTS", raising=False)
     return TTSSettings(engine="elevenlabs", voice=VOICE, speed=1)
