@@ -159,3 +159,33 @@ def test_configure_passes_existing_profile(monkeypatch):
     monkeypatch.setattr(cli, "run_interview", received.append)
     assert CliRunner().invoke(app, ["configure"]).exit_code == 0
     assert received == [profile]
+
+
+def test_voice_preview_needs_no_ollama_or_news(monkeypatch, tmp_path):
+    import morning_radio.cli as cli
+
+    shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+    monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
+    result = CliRunner().invoke(app, ["voice-preview"])
+    assert result.exit_code == 0
+    assert "Voice sample:" in result.output
+    assert len(list((tmp_path / "runs/voice-previews").glob("*/raw-audio/*.wav"))) == 1
+
+
+def test_voice_preview_missing_key_is_actionable(monkeypatch, tmp_path):
+    import morning_radio.cli as cli
+
+    shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+    monkeypatch.delenv("MORNING_RADIO_FAKE_TTS", raising=False)
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    result = CliRunner().invoke(app, ["voice-preview"])
+    assert result.exit_code == 1
+    assert "ELEVENLABS_API_KEY" in result.output
+    assert not list(tmp_path.glob("runs/**/*.wav"))
+
+
+@pytest.mark.parametrize("text", ["", "x" * 501])
+def test_voice_preview_bounds_paid_text(text):
+    assert CliRunner().invoke(app, ["voice-preview", "--text", text]).exit_code == 2

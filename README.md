@@ -11,14 +11,15 @@ The operator interface is the repository-root `./show` command:
 ./show morning --date 2026-08-14
 ./show feedback
 ./show doctor
+./show voice-preview
 ```
 
 ## Setup
 
-The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13, `uv`, and Ollama. Python 3.14 is not supported. Audio generation is enabled in the committed production configuration; it requires Kokoro, FFmpeg, and FFprobe.
+The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13, `uv`, and Ollama. Python 3.14 is not supported. Audio generation is enabled with ElevenLabs (Nathaniel C), FFmpeg, and FFprobe. Kokoro remains available as an optional local provider.
 
 ```bash
-uv sync --locked --dev --extra tts --python 3.12
+uv sync --locked --dev --python 3.12
 ./show doctor
 ./show configure
 ./show morning --minutes 10 --no-assets
@@ -34,6 +35,25 @@ form as the value. `inter_block_pause_ms` controls the short pause inserted betw
 paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_words`, with
 `sentence_pause_ms` inserted between those groups. Explicit `[PAUSE: ...]` directives are left
 unchanged.
+
+### ElevenLabs Speech
+
+The committed configuration uses Voice ID `AkzTpEeeEWvyZf4umyCJ` (Nathaniel C) and `eleven_multilingual_v2`. Set your key in the same terminal that runs `./show`. In zsh, this prompts without echoing the key or putting its value into command history:
+
+```zsh
+read -rs "ELEVENLABS_API_KEY?ElevenLabs API key: "
+printf '\n'
+export ELEVENLABS_API_KEY
+./show voice-preview
+```
+
+The preview prints a WAV path and does not run discovery, Ollama, or editorial verification. It uses ElevenLabs credits. `./show doctor` checks voice access without generating speech; the key needs Voices Read and Text to Speech permissions. Add Nathaniel C to My Voices if your account cannot access it. After the preview, run `./show morning` normally.
+
+Never put the key in YAML, a profile, a command argument, or Git. `.env` is ignored by Git but is **not automatically loaded**; this integration reads the environment only. The export above lasts for the current terminal session.
+
+Only speech text is sent to ElevenLabs, not the profile or article source files. Hosted requests are billed and subject to ElevenLabs' retention policies; zero-retention mode is not enabled. Speech failures stop the episode, with no silent fallback or automatic paid-request retry. A timeout can occur after billing, so inspect account usage before retrying.
+
+The adapter uses the [ElevenLabs speech API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), wraps 24 kHz mono 16-bit PCM in a real WAV container, and lets the existing mixer perform final resampling, loudness processing, music, and MP3 encoding. Larger sentence-aligned chunks and zero extra chunk pauses let the provider handle phrasing; explicit story pauses remain unchanged. Model/voice settings are under `tts.elevenlabs`, while voice IDs and speed remain under `tts`. The configured speed range is 0.7-1.2. To restore local speech, set `tts.engine: kokoro`, `tts.voice: af_bella`, and install `uv sync --locked --dev --extra tts`.
 
 ## Local Dependencies
 
@@ -80,6 +100,8 @@ The suite includes isolated script-only and MP3 fixture runs, a wheel-build chec
 Every episode writes `performance.json` with monotonic stage durations and process/subprocess memory high-water marks. Model-call logs separate Ollama loading from token-generation time. These measurements do not include the external Ollama process in Python's RSS.
 
 Reproducible performance and editorial checks:
+
+`--live` and `--episode` use the configured speech provider. With ElevenLabs selected, they send text to ElevenLabs and consume credits. Only the default fixture benchmark is offline and free of inference charges.
 
 ```bash
 # Three isolated full-pipeline fixture runs, without real inference.

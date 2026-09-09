@@ -1,17 +1,21 @@
 generate_audio: true
 
 tts:
-  engine: kokoro
-  voice: af_bella
+  engine: elevenlabs
+  voice: AkzTpEeeEWvyZf4umyCJ # Nathaniel C
   secondary_voice: null
   speed: 1.0
   inter_block_pause_ms: 220
-  sentence_pause_ms: 140
-  max_chunk_words: 55
-  pronunciation_overrides:
-    OpenAI: Open A I
-    macOS: mac O S
-    iOS: eye O S
+  sentence_pause_ms: 0
+  max_chunk_words: 150
+  pronunciation_overrides: {}
+  elevenlabs:
+    model_id: eleven_multilingual_v2
+    timeout_seconds: 120
+    stability: 0.5
+    similarity_boost: 0.75
+    style: 0.0
+    use_speaker_boost: true
 
 audio:
   bitrate_kbps: 128

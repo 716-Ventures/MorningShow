@@ -6,11 +6,13 @@ import sys
 from contextlib import suppress
 from datetime import date, datetime
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from rich.console import Console
 
 from morning_radio import db
+from morning_radio.audio.production import synthesize_script
 from morning_radio.dependencies import check_ffmpeg, check_llm, check_tts
 from morning_radio.profile.compiler import ProfileError, load_profile
 from morning_radio.profile.feedback import record_feedback
@@ -25,6 +27,27 @@ from morning_radio.settings import (
 
 app = typer.Typer(no_args_is_help=True, help="Generate a local personal morning radio episode.")
 console = Console()
+
+
+@app.command("voice-preview")
+def voice_preview(
+    text: str = "Good morning. Here's your briefing on AI, Apple, and the Buffalo Bills.",
+) -> None:
+    """Generate a short voice sample without news or LLM calls. Hosted TTS uses credits."""
+    if not text.strip() or len(text) > 500:
+        raise typer.BadParameter("Preview text must contain 1-500 characters.")
+    root = repo_root()
+    try:
+        production = load_production_settings(root)
+        run_dir = root / "runs" / "voice-previews" / uuid4().hex
+        metadata = synthesize_script(
+            "[HOST]\n" + " ".join(text.split()) + "\n", production, run_dir
+        )
+        for item in metadata:
+            console.print(f"Voice sample: {item.path}")
+    except (ConfigError, RuntimeError, OSError) as exc:
+        console.print(f"Voice preview failed: {exc}", style="red", markup=False)
+        raise typer.Exit(1) from exc
 
 
 @app.command()

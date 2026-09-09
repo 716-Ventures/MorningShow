@@ -8,7 +8,14 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, TypeAdapter
 
 from morning_radio.artifacts.io import atomic_write_json
-from morning_radio.audio.tts import TTSAdapter, build_tts_adapter, prepare_tts_text, speech_hash
+from morning_radio.audio.elevenlabs import ElevenLabsTTS
+from morning_radio.audio.tts import (
+    ToneTTS,
+    TTSAdapter,
+    build_tts_adapter,
+    prepare_tts_text,
+    speech_hash,
+)
 from morning_radio.models import AudioMetadata, EditorialProfile
 from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
@@ -74,10 +81,26 @@ def synthesize_script(
     profile: EditorialProfile | None = None,
     adapter: TTSAdapter | None = None,
 ) -> list[AudioMetadata]:
+    if adapter is not None:
+        return _synthesize_script(script, production, run_dir, profile, adapter)
+    owned = build_tts_adapter(production.tts.engine, settings=production.tts)
+    try:
+        return _synthesize_script(script, production, run_dir, profile, owned)
+    finally:
+        if isinstance(owned, ElevenLabsTTS):
+            owned.close()
+
+
+def _synthesize_script(
+    script: str,
+    production: ProductionSettings,
+    run_dir: Path,
+    profile: EditorialProfile | None,
+    adapter: TTSAdapter,
+) -> list[AudioMetadata]:
     voice, secondary = resolve_voices(production, profile)
-    if adapter is None and os.environ.get("MORNING_RADIO_FAKE_TTS") == "1":
+    if isinstance(adapter, ToneTTS) and os.environ.get("MORNING_RADIO_FAKE_TTS") == "1":
         voice = secondary = "tone"
-    adapter = adapter or build_tts_adapter(production.tts.engine)
     available = set(adapter.available_voices())
     manifest: list[AudioMetadata] = []
     cache: dict[str, AudioMetadata] = {}
@@ -117,6 +140,11 @@ def synthesize_script(
 def resolve_voices(
     production: ProductionSettings, profile: EditorialProfile | None = None
 ) -> tuple[str, str]:
+    if production.tts.engine == "elevenlabs":
+        primary = production.tts.voice
+        if not primary:
+            raise RuntimeError("Configure an ElevenLabs Voice ID in tts.voice.")
+        return primary, production.tts.secondary_voice or primary
     primary = production.tts.voice or profile_voice(profile, "primary_voice") or "tone"
     secondary = (
         production.tts.secondary_voice or profile_voice(profile, "secondary_voice") or primary

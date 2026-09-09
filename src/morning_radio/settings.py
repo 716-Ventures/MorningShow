@@ -12,6 +12,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from morning_radio.models import FeedConfig
@@ -61,8 +62,17 @@ class AppSettings(Configuration):
     verification: VerificationSettings
 
 
+class ElevenLabsSettings(Configuration):
+    model_id: str = Field(default="eleven_multilingual_v2", min_length=1, max_length=100)
+    timeout_seconds: int = Field(default=120, ge=1, le=600)
+    stability: float = Field(default=0.5, ge=0, le=1)
+    similarity_boost: float = Field(default=0.75, ge=0, le=1)
+    style: float = Field(default=0, ge=0, le=1)
+    use_speaker_boost: bool = True
+
+
 class TTSSettings(Configuration):
-    engine: Literal["kokoro", "tone"]
+    engine: Literal["kokoro", "tone", "elevenlabs"]
     voice: str | None = None
     secondary_voice: str | None = None
     speed: float = Field(gt=0, le=3)
@@ -70,6 +80,19 @@ class TTSSettings(Configuration):
     sentence_pause_ms: int = Field(default=140, ge=0, le=1000)
     max_chunk_words: int = Field(default=55, ge=15, le=150)
     pronunciation_overrides: dict[str, str] = Field(default_factory=dict)
+    elevenlabs: ElevenLabsSettings = Field(default_factory=ElevenLabsSettings)
+
+    @model_validator(mode="after")
+    def valid_provider_settings(self) -> TTSSettings:
+        if self.engine == "elevenlabs":
+            if not self.voice:
+                raise ValueError("ElevenLabs requires tts.voice to contain a Voice ID")
+            for voice in (self.voice, self.secondary_voice):
+                if voice is not None and (not voice.isascii() or not voice.isalnum()):
+                    raise ValueError("ElevenLabs voices must be alphanumeric Voice IDs")
+            if not 0.7 <= self.speed <= 1.2:
+                raise ValueError("ElevenLabs speed must be between 0.7 and 1.2")
+        return self
 
     @field_validator("pronunciation_overrides")
     @classmethod

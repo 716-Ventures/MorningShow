@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import httpx
 from pydantic import BaseModel
 
+from morning_radio.audio.elevenlabs import ElevenLabsTTS
 from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
 from morning_radio.settings import AppSettings, ProductionSettings
 
@@ -100,6 +101,24 @@ def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
 
 
 def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
+    if production.tts.engine == "elevenlabs":
+        adapter = None
+        try:
+            adapter = build_tts_adapter("elevenlabs", settings=production.tts)
+            voices = adapter.available_voices()
+            return [DependencyCheck("ElevenLabs voice access", True, ", ".join(voices))]
+        except RuntimeError as exc:
+            return [
+                DependencyCheck(
+                    "ElevenLabs voice access",
+                    False,
+                    str(exc),
+                    "Set ELEVENLABS_API_KEY and grant Voices Read and Text to Speech permissions.",
+                )
+            ]
+        finally:
+            if isinstance(adapter, ElevenLabsTTS):
+                adapter.close()
     if production.tts.engine != "kokoro":
         return [DependencyCheck("TTS backend", True, production.tts.engine)]
     if not kokoro_importable():

@@ -27,9 +27,11 @@ def test_valid_config_loads(tmp_path: Path) -> None:
     assert any(feed.enabled for feed in feeds.feeds)
     assert production.generate_audio is True
     assert production.tts.inter_block_pause_ms == 220
-    assert production.tts.sentence_pause_ms == 140
-    assert production.tts.max_chunk_words == 55
-    assert production.tts.pronunciation_overrides["OpenAI"] == "Open A I"
+    assert production.tts.engine == "elevenlabs"
+    assert production.tts.voice == "AkzTpEeeEWvyZf4umyCJ"
+    assert production.tts.sentence_pause_ms == 0
+    assert production.tts.max_chunk_words == 150
+    assert production.tts.pronunciation_overrides == {}
 
 
 def test_invalid_numeric_boundary_fails(tmp_path: Path) -> None:

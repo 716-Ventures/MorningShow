@@ -43,7 +43,7 @@ def test_live_driver_reports_measurements_and_closes_client(monkeypatch, tmp_pat
 
     client = Client()
     monkeypatch.setattr(benchmark, "OllamaClient", lambda *args: client)
-    monkeypatch.setattr(benchmark, "build_tts_adapter", lambda engine: ToneTTS())
+    monkeypatch.setattr(benchmark, "build_tts_adapter", lambda engine, **kwargs: ToneTTS())
     monkeypatch.setattr(benchmark, "resolve_voices", lambda production: ("tone", "tone"))
     monkeypatch.setattr(
         benchmark.httpx,

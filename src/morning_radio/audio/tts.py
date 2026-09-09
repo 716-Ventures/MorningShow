@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from morning_radio.models import AudioMetadata
+from morning_radio.settings import TTSSettings
 
 
 class TTSError(RuntimeError):
@@ -212,11 +213,17 @@ def speech_hash(
     ).hexdigest()
 
 
-def build_tts_adapter(engine: str) -> TTSAdapter:
+def build_tts_adapter(engine: str, *, settings: TTSSettings | None = None) -> TTSAdapter:
     if os.environ.get("MORNING_RADIO_FAKE_TTS") == "1" or engine == "tone":
         return ToneTTS()
     if engine == "kokoro":
         return KokoroTTS()
+    if engine == "elevenlabs":
+        from morning_radio.audio.elevenlabs import ElevenLabsTTS
+
+        if settings is None:
+            raise TTSError("ElevenLabs requires TTS settings and a Voice ID.")
+        return ElevenLabsTTS(settings)
     raise TTSError(f"Unsupported TTS engine: {engine}")
 
 

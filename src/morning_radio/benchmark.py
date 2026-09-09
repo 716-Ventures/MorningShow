@@ -23,6 +23,7 @@ from pathlib import Path
 import httpx
 
 from morning_radio.artifacts.io import atomic_write_json, atomic_write_text
+from morning_radio.audio.elevenlabs import ElevenLabsTTS
 from morning_radio.audio.production import resolve_voices
 from morning_radio.audio.tts import build_tts_adapter, prepare_tts_text
 from morning_radio.evaluation import evaluate_live, load_corpus
@@ -175,7 +176,7 @@ def run_benchmark(
             llm_ms = (time.monotonic() - started) * 1000
             tts_started = time.monotonic()
             if adapter is None:
-                adapter = build_tts_adapter(production.tts.engine)
+                adapter = build_tts_adapter(production.tts.engine, settings=production.tts)
             prepared = prepare_tts_text(corpus.speech, production.tts.pronunciation_overrides)
             audio = adapter.synthesize(
                 prepared, voice, sample_dir / "speech.wav", speed=production.tts.speed
@@ -204,6 +205,8 @@ def run_benchmark(
         raise
     finally:
         client.close()
+        if isinstance(adapter, ElevenLabsTTS):
+            adapter.close()
     return path
 
 
