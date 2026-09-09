@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import shutil
 import subprocess
@@ -30,6 +31,44 @@ SILENCE_THRESHOLD_DB = -60
 SILENCE_DETECTION_SECONDS = 0.08
 LEADING_SILENCE_SECONDS = 0.03
 TRAILING_SILENCE_SECONDS = 0.08
+PEAK_LIMITER = "alimiter=limit=0.84:level=false:latency=true"
+
+
+def measure_loudness(ffmpeg: str, source: Path, run_dir: Path) -> float:
+    label = f"measure-{source.stem}"
+    run_command(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-i",
+            str(source),
+            "-af",
+            "loudnorm=print_format=json",
+            "-f",
+            "null",
+            "-",
+        ],
+        run_dir,
+        label,
+    )
+    stderr = (run_dir / "mix" / f"{label}-stderr.txt").read_text()
+    try:
+        measurement, _ = json.JSONDecoder().raw_decode(stderr[stderr.rfind("{") :])
+        return float(measurement["input_i"])
+    except (ValueError, KeyError) as exc:
+        raise AudioMasterError(f"Cannot measure loudness of {source}") from exc
+
+
+def usable_asset(ffmpeg: str, source: Path, optional: bool, run_dir: Path) -> bool:
+    level = measure_loudness(ffmpeg, source, run_dir)
+    if math.isfinite(level) and level >= -40:
+        return True
+    message = f"Audio asset {source} measures {level:.1f} LUFS; re-export at normal music level."
+    if not optional:
+        raise AudioMasterError(message)
+    logging.getLogger(__name__).warning("Skipping optional asset: %s", message)
+    atomic_write_text(run_dir / "mix" / f"skipped-{source.stem}.txt", message)
+    return False
 
 
 def write_silence(
@@ -106,6 +145,8 @@ def mix_and_master(
                 continue
             if item.path is None:
                 raise AudioMasterError(f"Production item has no asset path: {item.directive}")
+            if not usable_asset(ffmpeg, item.path, item.optional, run_dir):
+                continue
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-{item.type}.wav"
             is_opening = isinstance(item, MusicItem) and item.directive.casefold() == (
@@ -128,6 +169,9 @@ def mix_and_master(
                 continue
             if item.path is None:
                 raise AudioMasterError(f"Bed item has no asset path: {item.directive}")
+            if not usable_asset(ffmpeg, item.path, item.optional, run_dir):
+                active_bed = None
+                continue
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-bed.wav"
             normalize_audio(ffmpeg, item.path, rendered, production, run_dir)
@@ -170,7 +214,7 @@ def mix_and_master(
             "-i",
             str(intermediate),
             "-af",
-            f"loudnorm=I={production.audio.loudness_target_lufs}:TP=-1.5:LRA=11:print_format=json",
+            PEAK_LIMITER,
             "-ar",
             str(production.audio.sample_rate_hz),
             "-ac",
@@ -222,7 +266,7 @@ def normalize_audio(
 ) -> None:
     filters = [
         silence_trim_filter(leading=trim_leading, trailing=trim_trailing),
-        loudness_filter(production),
+        loudness_filter(production, measure_loudness(ffmpeg, source, run_dir)),
     ]
     audio_filter = ",".join(item for item in filters if item is not None)
     run_command(
@@ -267,8 +311,11 @@ def silence_trim_filter(*, leading: bool, trailing: bool) -> str | None:
     return ",".join(filters) or None
 
 
-def loudness_filter(production: ProductionSettings) -> str:
-    return f"loudnorm=I={production.audio.loudness_target_lufs}:TP=-1.5:LRA=11"
+def loudness_filter(production: ProductionSettings, input_lufs: float = -24) -> str:
+    gain = min(12.0, production.audio.loudness_target_lufs - input_lufs)
+    if not math.isfinite(input_lufs):
+        gain = 0.0
+    return f"volume={gain:.3f}dB,{PEAK_LIMITER}"
 
 
 def mix_bed_under_speech(
@@ -284,7 +331,7 @@ def mix_bed_under_speech(
     layout = "mono" if production.audio.channels == 1 else "stereo"
     speech_filters = [
         silence_trim_filter(leading=trim_speech_leading, trailing=False),
-        loudness_filter(production),
+        loudness_filter(production, measure_loudness(ffmpeg, speech, run_dir)),
     ]
     speech_filter = ",".join(item for item in speech_filters if item is not None)
     run_command(
@@ -301,7 +348,8 @@ def mix_bed_under_speech(
             (
                 f"[0:a]{speech_filter}[speech];"
                 "[1:a]volume=0.18[bed];"
-                f"[speech][bed]amix=inputs=2:duration=first:dropout_transition=0,"
+                f"[speech][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+                f"{PEAK_LIMITER},"
                 f"aresample={production.audio.sample_rate_hz},"
                 f"aformat=channel_layouts={layout}[out]"
             ),

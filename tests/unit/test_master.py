@@ -10,6 +10,7 @@ from morning_radio.audio.master import (
     coerce_production_plan,
     escape_concat_path,
     loudness_filter,
+    measure_loudness,
     metadata_args,
     mix_and_master,
     mix_bed_under_speech,
@@ -20,6 +21,40 @@ from morning_radio.audio.master import (
     validate_final_mp3,
 )
 from morning_radio.settings import ProductionSettings
+
+
+@pytest.fixture(autouse=True)
+def mock_loudness_measurement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(master_module, "measure_loudness", lambda *args: -24.0)
+
+
+def test_loudness_gain_is_bounded_and_silence_is_not_amplified() -> None:
+    assert "volume=12.000dB" in loudness_filter(production_settings(), -55)
+    assert "volume=0.000dB" in loudness_filter(production_settings(), float("-inf"))
+
+
+def test_measurement_accepts_ffmpeg_output_after_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(command: list[str], root: Path, label: str) -> None:
+        (root / "mix").mkdir()
+        (root / "mix" / f"{label}-stderr.txt").write_text(
+            'FFmpeg statistics\n{"input_i": "-24.1"}\nFinal output statistics\n'
+        )
+
+    monkeypatch.setattr(master_module, "run_command", fake_run)
+    assert measure_loudness("ffmpeg", tmp_path / "speech.wav", tmp_path) == -24.1
+
+
+def test_quiet_assets_are_skipped_or_fail_when_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(master_module, "measure_loudness", lambda *args: -52.0)
+    source = tmp_path / "bed.wav"
+    assert not master_module.usable_asset("ffmpeg", source, True, tmp_path)
+    assert (tmp_path / "mix" / "skipped-bed.txt").exists()
+    with pytest.raises(AudioMasterError, match="re-export"):
+        master_module.usable_asset("ffmpeg", source, False, tmp_path)
 
 
 def production_settings() -> ProductionSettings:
@@ -326,6 +361,7 @@ def test_bed_mix_preserves_speech_boundaries_by_default(
     audio_filter = command[command.index("-filter_complex") + 1]
     assert f"[0:a]{loudness_filter(production_settings())}[speech]" in audio_filter
     assert "[speech][bed]amix=" in audio_filter
+    assert "normalize=0" in audio_filter
 
 
 def test_bed_mix_can_trim_leading_speech_boundary(
