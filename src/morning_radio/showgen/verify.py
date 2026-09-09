@@ -18,9 +18,20 @@ from morning_radio.models import (
     VerificationResult,
     VerifiedScript,
 )
-from morning_radio.showgen.script import ScriptError, validate_script, validate_script_quality
+from morning_radio.showgen.script import (
+    ScriptError,
+    match_story_sections,
+    normalize_script_format,
+    spoken_blocks,
+    validate_script,
+    validate_script_quality,
+)
 
-MAX_LLM_VERIFICATION_PROMPT_CHARS = 80_000
+MAX_LLM_VERIFICATION_PROMPT_CHARS = 12_000
+
+
+class VerificationUnavailableError(RuntimeError):
+    """Verification could not finish; this is not an unsupported-claim finding."""
 
 
 def verify_script(
@@ -157,48 +168,135 @@ def _verify_once(
             },
             ensure_ascii=False,
         )
-        fixture_fallback = allows_fixture_fallback(llm)
-        oversized_prompt = len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
-        if not fixture_fallback and oversized_prompt:
-            atomic_write_json(
-                run_dir / "logs" / "verification-fallback.json",
-                {
-                    "model": llm.model,
-                    "reason": "Verification prompt exceeded local model guardrail.",
-                    "input_character_count": len(verification_prompt),
-                    "fixture_fallback": fixture_fallback,
-                },
+        if len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS and len(dossiers) > 1:
+            return _verify_passages(
+                script, dossiers, extractions or [], run_dir, llm, cycle, profile, rundown
             )
-            return _verification_unavailable(
-                "Verification prompt exceeded the model size limit."
-            ), None
-        try:
-            response = llm.generate_structured(
-                VERIFY_SYSTEM,
-                verification_prompt,
-                VerificationResponse,
-                stage="verification",
-                prompt_type="editorial_gate",
-            )
-            return response.verification, response.corrected_script
-        except (LLMError, ValidationError) as exc:
-            atomic_write_json(
-                run_dir / "logs" / "verification-fallback.json",
-                {
-                    "model": llm.model,
-                    "reason": str(exc),
-                    "fixture_fallback": allows_fixture_fallback(llm),
-                },
-            )
-            return _verification_unavailable(f"Verification model failed: {exc}"), None
+        return _request_verification(verification_prompt, run_dir, llm)
     return (
-        VerificationResult(
-            status="pass",
-            issues=[],
-            corrected_script_required=False,
-        ),
+        VerificationResult(status="pass", issues=[], corrected_script_required=False),
         None,
     )
+
+
+def _verify_passages(
+    script: str,
+    dossiers: list[StoryDossier],
+    extractions: list[ExtractionResult],
+    run_dir: Path,
+    llm: LLMClient,
+    cycle: int,
+    profile: Any | None,
+    rundown: Rundown | None,
+) -> tuple[VerificationResult, str | None]:
+    """Check every spoken line, then cross-story editorial quality, with bounded context."""
+    sections = match_story_sections(script, dossiers)
+    lines = script.splitlines(keepends=True)
+    host = "HOST"
+    correction_issues: list[VerificationIssue] = []
+    for index, line in enumerate(lines):
+        text = line.strip()
+        if text in {"[HOST]", "[HOST 2]"}:
+            host = text.strip("[]")
+        if not text or text.startswith("["):
+            continue
+        relevant = [dossier for dossier in dossiers if sections.get(dossier.cluster_id) == text]
+        # Unmatched transitions receive no factual evidence: unsupported claims must fail,
+        # not disappear from the gate because they were outside a matched story body.
+        prompt = json.dumps(
+            {
+                "task": "Verify every claim in this passage against source_evidence. Dossiers are not independent evidence. Ordinary greetings need no citation. Return corrections for this passage only, under its host marker.",
+                "script": f"[{host}]\n{text}\n",
+                "dossiers": [item.model_dump(mode="json") for item in relevant],
+                "source_evidence": compact_source_evidence(relevant, extractions),
+                "correction_cycle": cycle,
+            },
+            ensure_ascii=False,
+        )
+        result, correction = _request_verification(prompt, run_dir, llm)
+        atomic_write_json(
+            run_dir / "logs" / f"verification-{cycle}-passage-{index}.json",
+            result.model_dump(mode="json"),
+        )
+        if result.status != "pass":
+            if correction:
+                try:
+                    correction = normalize_script_format(correction)
+                    if not correction.lstrip().startswith("["):
+                        correction = f"[{host}]\n{correction}"
+                    validate_script(correction)
+                    if any(
+                        part.strip().startswith("[") and part.strip() != f"[{host}]"
+                        for part in correction.splitlines()
+                    ):
+                        raise ScriptError(
+                            "Passage correction may not change production directives."
+                        )
+                    copy = " ".join(body for _, body in spoken_blocks(correction))
+                    if not copy:
+                        raise ScriptError("Passage correction may not remove the entire passage.")
+                except ScriptError as exc:
+                    return _script_structure_failure(str(exc)), None
+                if copy == text:
+                    return result, None
+                lines[index] = copy + ("\n" if line.endswith("\n") else "")
+                correction_issues.extend(result.issues)
+                continue
+            return result, None
+    if "".join(lines) != script:
+        return VerificationResult(
+            status="fail", issues=correction_issues, corrected_script_required=True
+        ), "".join(lines)
+    # Source support has been checked above. Keep a whole-script pass so splitting
+    # evidence does not remove checks for repetition or awkward cross-story copy.
+    overview = json.dumps(
+        {
+            "task": "All passages have passed source verification separately. Check this complete script ONLY for duplicate coverage and awkward spoken copy. Do not repeat factual verification without the source evidence. Return the complete script if correcting editorial issues.",
+            "script": script,
+            "profile": _dump_optional_model(profile),
+            "rundown": _dump_optional_model(rundown),
+            "correction_cycle": cycle,
+        },
+        ensure_ascii=False,
+    )
+    return _request_verification(overview, run_dir, llm)
+
+
+def _request_verification(
+    verification_prompt: str, run_dir: Path, llm: LLMClient
+) -> tuple[VerificationResult, str | None]:
+    fixture_fallback = allows_fixture_fallback(llm)
+    oversized_prompt = len(verification_prompt) > MAX_LLM_VERIFICATION_PROMPT_CHARS
+    if not fixture_fallback and oversized_prompt:
+        atomic_write_json(
+            run_dir / "logs" / "verification-fallback.json",
+            {
+                "model": llm.model,
+                "reason": "Verification prompt exceeded local model guardrail.",
+                "input_character_count": len(verification_prompt),
+                "fixture_fallback": fixture_fallback,
+            },
+        )
+        return _verification_unavailable("Verification prompt exceeded the model size limit."), None
+    try:
+        response = llm.generate_structured(
+            VERIFY_SYSTEM,
+            verification_prompt,
+            VerificationResponse,
+            stage="verification",
+            prompt_type="editorial_gate",
+        )
+        return response.verification, response.corrected_script
+    except (LLMError, ValidationError) as exc:
+        atomic_write_json(
+            run_dir / "logs" / "verification-fallback.json",
+            {
+                "model": llm.model,
+                "reason": str(exc),
+                "fixture_fallback": allows_fixture_fallback(llm),
+            },
+        )
+        return _verification_unavailable(f"Verification model failed: {exc}"), None
 
 
 def _script_structure_failure(explanation: str) -> VerificationResult:

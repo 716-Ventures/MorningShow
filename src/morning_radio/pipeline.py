@@ -48,7 +48,7 @@ from morning_radio.settings import (
 )
 from morning_radio.showgen.rundown import build_rundown
 from morning_radio.showgen.script import write_script
-from morning_radio.showgen.verify import verify_script
+from morning_radio.showgen.verify import VerificationUnavailableError, verify_script
 
 
 class MorningPipelineError(RuntimeError):
@@ -97,7 +97,12 @@ def run_morning(
             str(exc),
             run_id=context.record.run_id,
             failed_stage=context.record.failed_stage or context.record.status.value,
-            action=stage_action(context.record.failed_stage or context.record.status.value),
+            action=(
+                "Check Ollama availability and logs/verification-fallback.json, then retry. "
+                "The verifier did not complete; unsupported claims were not established."
+                if isinstance(exc, VerificationUnavailableError)
+                else stage_action(context.record.failed_stage or context.record.status.value)
+            ),
         ) from exc
     finally:
         if isinstance(llm, OllamaClient):
@@ -179,6 +184,16 @@ def _run_pipeline(
     )
     context.register_artifact("verification", context.run_dir / "verification.json")
     if verified.verification.status != "pass":
+        unavailable = next(
+            (
+                issue
+                for issue in verified.verification.issues
+                if issue.category == "verification_unavailable"
+            ),
+            None,
+        )
+        if unavailable is not None:
+            raise VerificationUnavailableError(unavailable.explanation)
         raise RuntimeError("Verification failed with high-severity issues.")
     final_script = verified.script
     script_path = context.run_dir / "script-final.md"

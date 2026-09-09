@@ -58,6 +58,8 @@ An explicit minutes override takes precedence over the profile's usual variable-
 
 Grounded script fallback uses the same per-story word limit as validation. It reserves uncertainty notes and retains complete sentences from the start of the story. It must fail if the lead and required cautions cannot fit; never truncate a claim midway or remove a caveat to meet runtime.
 
+Verification requests have a 12,000-character guardrail (not an exact token count). Larger multi-story episodes are checked passage by passage with matched source evidence, followed by a complete-script editorial check for repetition and flow. Every spoken line is checked, including unmatched transitions; those have no supporting evidence and cannot introduce unsupported facts. Passage corrections preserve host/production cues and are verified again in the next bounded correction cycle. A single oversized request, timeout, or invalid model response still blocks publication. The CLI distinguishes unavailable verification from actual unsupported-claim findings; inspect `logs/verification-fallback.json` for service failures and `logs/verification-*-passage-*.json` for individual passage results.
+
 ## Measurement and Evaluation
 
 `performance.json` accompanies successful and failed stages. Elapsed times use a monotonic clock; RSS values are lifetime high-water marks for the Python process and its subprocesses, not a sum of simultaneously resident memory. Live benchmark reports also capture Ollama's loaded-model sizes. The model-call log records Ollama's [loading and generation timing fields](https://docs.ollama.com/api/usage) in nanoseconds separately from request wall time.

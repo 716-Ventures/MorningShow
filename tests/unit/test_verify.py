@@ -353,3 +353,177 @@ def test_verification_prompt_compacts_long_source_evidence(tmp_path: Path) -> No
 def substantive_script() -> str:
     words = " ".join(["context"] * 60)
     return f"[HOST]\nFact. This story has {words}.\n"
+
+
+def large_dossiers() -> list[StoryDossier]:
+    return [
+        valid_dossier().model_copy(
+            update={
+                "cluster_id": f"cluster-{index}",
+                "working_headline": name,
+                "what_happened": f"{name} released details.",
+                "background_needed": "background " * 600,
+                "source_ids": [f"source-{index}"],
+            }
+        )
+        for index, name in enumerate(("Apple", "Buffalo"))
+    ]
+
+
+class PassageLLM(CapturingLLM):
+    def __init__(self, fail_at: int | None = None, correct: bool = False) -> None:
+        super().__init__()
+        self.payloads: list[dict] = []
+        self.fail_at = fail_at
+        self.correct = correct
+
+    def generate_structured(self, *args, **kwargs):
+        self.payloads.append(json.loads(args[1]))
+        assert len(args[1]) <= 12_000
+        if len(self.payloads) == self.fail_at:
+            if not self.correct:
+                raise LLMError("timed out")
+            return args[2].model_validate(
+                {
+                    "verification": {
+                        "status": "fail",
+                        "issues": [
+                            {
+                                "severity": "high",
+                                "category": "unsupported_claim",
+                                "script_excerpt": "released",
+                                "explanation": "Needs correction",
+                                "required_action": "rewrite",
+                            }
+                        ],
+                        "corrected_script_required": True,
+                    },
+                    "corrected_script": "[HOST]\nApple released details cautiously.\n",
+                }
+            )
+        return super().generate_structured(*args, **kwargs)
+
+
+def test_large_verification_checks_every_passage_and_whole_script(tmp_path: Path) -> None:
+    llm = PassageLLM()
+    script = "[HOST]\nApple released details.\n\n[BUMPER: bumper]\n[HOST]\nBuffalo released details.\n[HOST]\nGood morning.\n"
+    result = verify_script(script, large_dossiers(), tmp_path, llm)
+    assert result.verification.status == "pass"
+    assert len(llm.payloads) == 4
+    assert [p["dossiers"][0]["cluster_id"] for p in llm.payloads[:2]] == ["cluster-0", "cluster-1"]
+    assert llm.payloads[2]["dossiers"] == []
+    assert llm.payloads[3]["script"] == script
+
+
+def test_one_unavailable_passage_blocks_whole_episode(tmp_path: Path) -> None:
+    llm = PassageLLM(fail_at=2)
+    result = verify_script(
+        "[HOST]\nApple released details.\n[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        llm,
+    )
+    assert result.verification.status == "fail"
+    assert result.verification.issues[0].category == "verification_unavailable"
+    assert not (tmp_path / "script-final.md").exists()
+
+
+def test_passage_correction_retains_other_copy_and_cues_and_is_rechecked(tmp_path: Path) -> None:
+    llm = PassageLLM(fail_at=1, correct=True)
+    result = verify_script(
+        "[HOST]\nApple released details.\n[BUMPER: bumper]\n[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        llm,
+    )
+    assert result.verification.status == "pass"
+    assert "Apple released details cautiously." in result.script
+    assert "[BUMPER: bumper]\n[HOST]\nBuffalo released details." in result.script
+    assert len(llm.payloads) == 5
+    assert "cautiously" in llm.payloads[2]["script"]
+
+
+@pytest.mark.parametrize(
+    "correction",
+    ["- Markdown list.", "[HOST]\n", "[HOST]\nApple released details.\n[MUSIC: CLOSING]\n"],
+)
+def test_invalid_passage_correction_never_changes_production(tmp_path, correction):
+    class InvalidPassage(PassageLLM):
+        def generate_structured(self, *args, **kwargs):
+            response = super().generate_structured(*args, **kwargs)
+            if response.corrected_script:
+                response.corrected_script = correction
+            return response
+
+    result = verify_script(
+        "[HOST]\nApple released details.\n[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        InvalidPassage(1, True),
+    )
+    assert result.verification.status == "fail"
+    assert result.verification.issues[0].category == "script_structure"
+    assert not (tmp_path / "script-final.md").exists()
+
+
+def test_global_editorial_failure_still_blocks_after_passages_pass(tmp_path):
+    class GlobalFailure(PassageLLM):
+        def generate_structured(self, *args, **kwargs):
+            response = super().generate_structured(*args, **kwargs)
+            if len(self.payloads) == 3:
+                return args[2].model_validate(
+                    {
+                        "verification": {
+                            "status": "fail",
+                            "issues": [
+                                {
+                                    "severity": "high",
+                                    "category": "duplicate_coverage",
+                                    "script_excerpt": "details",
+                                    "explanation": "Repeated story",
+                                    "required_action": "rewrite",
+                                }
+                            ],
+                            "corrected_script_required": True,
+                        }
+                    }
+                )
+            return response
+
+    result = verify_script(
+        "[HOST]\nApple released details.\n[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        GlobalFailure(),
+    )
+    assert result.verification.status == "fail"
+    assert result.verification.issues[0].category == "duplicate_coverage"
+    assert not (tmp_path / "script-final.md").exists()
+
+
+def test_unchanged_passage_correction_does_not_clear_failure(tmp_path):
+    script = "[HOST]\nApple released details cautiously.\n[HOST]\nBuffalo released details.\n"
+    result = verify_script(script, large_dossiers(), tmp_path, PassageLLM(1, True))
+    assert result.verification.status == "fail"
+    assert result.verification.issues[0].category == "unsupported_claim"
+    assert not (tmp_path / "script-final.md").exists()
+
+
+def test_plain_passage_correction_inherits_host_and_is_verified_again(tmp_path):
+    class PlainCorrection(PassageLLM):
+        def generate_structured(self, *args, **kwargs):
+            response = super().generate_structured(*args, **kwargs)
+            if response.corrected_script:
+                response.corrected_script = response.corrected_script.replace("[HOST]\n", "")
+            return response
+
+    llm = PlainCorrection(1, True)
+    result = verify_script(
+        "[HOST]\nApple released details.\n[BUMPER: bumper]\n[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        llm,
+    )
+    assert result.verification.status == "pass"
+    assert "[HOST]\nApple released details cautiously." in result.script
+    assert "cautiously" in llm.payloads[2]["script"]

@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from morning_radio.llm.client import FakeLLM, LLMError
 from morning_radio.models import StageStatus
-from morning_radio.pipeline import run_morning
+from morning_radio.pipeline import MorningPipelineError, run_morning
 from morning_radio.profile.compiler import default_profile, save_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,3 +83,22 @@ def test_fixture_morning_run_records_verification_failure(monkeypatch, tmp_path:
     metrics = json.loads((run_dir / "performance.json").read_text())
     assert metrics["stages"][-1]["status"] == "failed"
     assert metrics["stages"][-1]["stage"] == "verifying"
+
+
+def test_verifier_timeout_reports_service_failure_not_unsupported_claims(monkeypatch, tmp_path):
+    class TimeoutVerifier(FakeLLM):
+        def generate_structured(self, *args, **kwargs):
+            if kwargs.get("stage") == "verification":
+                raise LLMError("timed out")
+            return super().generate_structured(*args, **kwargs)
+
+    root = isolated_root(tmp_path)
+    monkeypatch.setenv("MORNING_RADIO_FIXTURE_RUN", "1")
+    monkeypatch.setenv("MORNING_RADIO_FIXTURE_DIR", str(FIXTURE_DIR))
+    monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
+    monkeypatch.setattr("morning_radio.pipeline.build_llm_client", lambda *_: TimeoutVerifier())
+    with pytest.raises(MorningPipelineError, match="timed out") as caught:
+        run_morning(date(2026, 8, 15), minutes=10, no_assets=True, root=root)
+    assert "unsupported claims were not established" in caught.value.action
+    assert "Ollama" in caught.value.action
+    assert not list(root.glob("runs/**/episode.mp3"))
