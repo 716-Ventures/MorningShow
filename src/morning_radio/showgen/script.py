@@ -283,7 +283,7 @@ def add_standard_production_directives(
         return "\n\n".join(tokens) + "\n"
 
     matching_script = "\n\n".join(tokens) + "\n"
-    story_sections = _match_story_sections(matching_script, dossiers)
+    story_sections = match_story_sections(matching_script, dossiers)
     section_indexes = {
         cluster_id: tokens.index(section)
         for cluster_id, section in story_sections.items()
@@ -389,7 +389,7 @@ def validate_script_quality(
             f"Script is too shallow for {len(dossiers)} stories: "
             f"{spoken_words} spoken words; requires at least {minimum_words}."
         )
-    story_sections = _match_story_sections(script, dossiers)
+    story_sections = match_story_sections(script, dossiers)
     if len(story_sections) < len(dossiers):
         raise ScriptError(
             f"Script covers only {len(story_sections)} of {len(dossiers)} dossier topics."
@@ -466,10 +466,11 @@ def _title_mentioned(title: str, script: str) -> bool:
     return len(significant & script_words) >= required
 
 
-def _match_story_sections(
+def match_story_sections(
     script: str,
     dossiers: list[StoryDossier],
 ) -> dict[str, str]:
+    """Match spoken bodies to dossiers without requiring a headline readout."""
     sections = [text for _, text in spoken_blocks(script)]
     available = set(range(len(sections)))
     matches: dict[str, str] = {}

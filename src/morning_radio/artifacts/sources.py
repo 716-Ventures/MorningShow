@@ -5,7 +5,7 @@ from pathlib import Path
 
 from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.models import CandidateStory, Cluster, Rundown, StoryDossier
-from morning_radio.showgen.script import spoken_blocks
+from morning_radio.showgen.script import match_story_sections, spoken_blocks
 
 
 def write_sources_page(
@@ -70,21 +70,15 @@ def scripted_source_order(
     ).casefold()
     if not full_story_text:
         full_story_text = final_script.casefold()
-    dossier_by_id = {item.cluster_id: item for item in dossiers}
-    ordered: list[str] = []
-    for cluster_id in story_order:
-        dossier = dossier_by_id.get(cluster_id)
-        if dossier is None:
-            continue
-        if dossier.working_headline.casefold() in full_story_text:
-            ordered.append(cluster_id)
-    return ordered
+    matches = match_story_sections(full_story_text, dossiers)
+    return sorted(
+        (cluster_id for cluster_id in story_order if cluster_id in matches),
+        key=lambda cluster_id: full_story_text.index(matches[cluster_id]),
+    )
 
 
 def supported_source_ids(dossier: StoryDossier) -> list[str]:
     supported = {
-        candidate_id
-        for fact in dossier.facts
-        for candidate_id in fact.supporting_candidate_ids
+        candidate_id for fact in dossier.facts for candidate_id in fact.supporting_candidate_ids
     }
     return [candidate_id for candidate_id in dossier.source_ids if candidate_id in supported]

@@ -26,6 +26,16 @@ def test_tone_tts_writes_playable_wav(tmp_path: Path) -> None:
     assert metadata.duration_seconds > 0
 
 
+def test_fake_tts_overrides_real_voice_configuration(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
+    manifest = synthesize_script(
+        "[HOST]\nGood morning.\n",
+        production_settings(engine="kokoro", voice="af_bella"),
+        tmp_path,
+    )
+    assert manifest[0].voice == "tone"
+
+
 def production_settings(**tts_overrides: object) -> ProductionSettings:
     tts: dict[str, object] = {
         "engine": "tone",

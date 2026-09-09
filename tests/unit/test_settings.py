@@ -25,7 +25,7 @@ def test_valid_config_loads(tmp_path: Path) -> None:
     production = load_production_settings(tmp_path)
     assert settings.news.minimum_article_words > 0
     assert any(feed.enabled for feed in feeds.feeds)
-    assert production.generate_audio is False
+    assert production.generate_audio is True
     assert production.tts.inter_block_pause_ms == 220
     assert production.tts.sentence_pause_ms == 140
     assert production.tts.max_chunk_words == 55

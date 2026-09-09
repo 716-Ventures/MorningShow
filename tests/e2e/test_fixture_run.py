@@ -6,9 +6,11 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import yaml
 
 from morning_radio.models import StageStatus
 from morning_radio.pipeline import run_morning
+from morning_radio.profile.compiler import default_profile, save_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "morning-run"
@@ -16,24 +18,28 @@ FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "morning-run"
 
 def isolated_root(tmp_path: Path) -> Path:
     root = tmp_path / "morning-radio-root"
-    for dirname in ("config", "assets"):
-        shutil.copytree(REPO_ROOT / dirname, root / dirname)
-    data_dir = root / "data"
-    data_dir.mkdir(parents=True)
-    for filename in ("profile.json", "profile.md", "editorial-memory.md"):
-        shutil.copy2(REPO_ROOT / "data" / filename, data_dir / filename)
+    shutil.copytree(REPO_ROOT / "config", root / "config")
+    (root / "assets").mkdir()
+    save_profile(default_profile(), root)
     return root
 
 
-def test_fixture_morning_run_completes_in_isolated_root(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("generate_audio", [False, True])
+def test_fixture_morning_run_completes_in_isolated_root(
+    monkeypatch, tmp_path: Path, generate_audio: bool
+) -> None:
     root = isolated_root(tmp_path)
+    config_path = root / "config" / "production.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["generate_audio"] = generate_audio
+    config_path.write_text(yaml.safe_dump(config))
     monkeypatch.setenv("MORNING_RADIO_FIXTURE_RUN", "1")
     monkeypatch.setenv("MORNING_RADIO_FIXTURE_DIR", str(FIXTURE_DIR))
     monkeypatch.setenv("MORNING_RADIO_FAKE_LLM", "1")
     monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
     result = run_morning(date(2026, 8, 14), minutes=10, no_assets=True, root=root)
 
-    assert result.episode is None
+    assert (result.episode is not None) == generate_audio
     assert result.script.endswith("script-final.md")
     assert (root / result.script).exists()
     assert (root / "data" / "app.db").exists()
@@ -42,12 +48,11 @@ def test_fixture_morning_run_completes_in_isolated_root(monkeypatch, tmp_path: P
     assert stories > 0
 
     run_dir = root / "runs" / "2026-08-14" / result.run_id
-    assert not (run_dir / "episode.mp3").exists()
-    assert not (run_dir / "production-plan.json").exists()
+    assert (run_dir / "episode.mp3").exists() == generate_audio
+    assert (run_dir / "production-plan.json").exists() == generate_audio
     extracted = sorted((run_dir / "extracted").glob("*.json"))
     statuses = {
-        json.loads(path.read_text(encoding="utf-8"))["extraction_status"]
-        for path in extracted
+        json.loads(path.read_text(encoding="utf-8"))["extraction_status"] for path in extracted
     }
     assert {"usable", "too_short"}.issubset(statuses)
 

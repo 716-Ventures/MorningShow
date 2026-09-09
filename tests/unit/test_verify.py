@@ -298,7 +298,7 @@ def test_verifier_payload_includes_profile_rundown_and_extractions(tmp_path: Pat
     assert llm.payload["source_evidence"][0]["candidate_id"] == "source-001"
 
 
-def test_recoverable_verification_model_error_uses_fallback(tmp_path: Path) -> None:
+def test_verification_model_error_blocks_publication(tmp_path: Path) -> None:
     verified = verify_script(
         "[HOST]\nDraft script.\n",
         [valid_dossier()],
@@ -307,11 +307,20 @@ def test_recoverable_verification_model_error_uses_fallback(tmp_path: Path) -> N
         maximum_correction_cycles=2,
     )
 
-    assert verified.verification.status == "pass"
-    assert (tmp_path / "script-final.md").exists()
+    assert verified.verification.status == "fail"
+    assert not (tmp_path / "script-final.md").exists()
     diagnostic = (tmp_path / "logs" / "verification-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "timed out" in diagnostic
+
+
+def test_oversized_verification_blocks_publication(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("morning_radio.showgen.verify.MAX_LLM_VERIFICATION_PROMPT_CHARS", 1)
+    verified = verify_script(
+        "[HOST]\nDraft script.\n", [valid_dossier()], tmp_path, ExplodingVerificationLLM()
+    )
+    assert verified.verification.status == "fail"
+    assert not (tmp_path / "script-final.md").exists()
 
 
 def test_verification_prompt_compacts_long_source_evidence(tmp_path: Path) -> None:

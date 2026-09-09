@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
-from morning_radio.artifacts.sources import write_sources_page
+from morning_radio.artifacts.sources import scripted_source_order, write_sources_page
 from morning_radio.models import (
     CandidateStory,
     Cluster,
@@ -129,7 +129,9 @@ def test_sources_page_uses_final_script_order_and_supported_sources(tmp_path: Pa
             what_is_new_today="It is new.",
             why_it_matters="It matters.",
             background_needed="None.",
-            facts=[DossierFact(claim="A removed thing happened.", supporting_candidate_ids=["removed"])],
+            facts=[
+                DossierFact(claim="A removed thing happened.", supporting_candidate_ids=["removed"])
+            ],
             recommended_seconds=60,
             source_ids=["removed"],
         ),
@@ -184,3 +186,6 @@ def test_sources_page_uses_final_script_order_and_supported_sources(tmp_path: Pa
     assert "Extra source" not in html
     assert "cluster-removed" not in html
     assert "Removed source" not in html
+
+    body_only = "[HOST]\nA used thing happened.\n"
+    assert scripted_source_order(body_only, rundown, dossiers) == ["cluster-used"]

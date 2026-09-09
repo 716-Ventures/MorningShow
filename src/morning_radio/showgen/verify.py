@@ -142,7 +142,9 @@ def _verify_once(
                 )
             )
     if issues:
-        return VerificationResult(status="fail", issues=issues, corrected_script_required=True), None
+        return VerificationResult(
+            status="fail", issues=issues, corrected_script_required=True
+        ), None
     if llm is not None:
         verification_prompt = json.dumps(
             {
@@ -167,7 +169,9 @@ def _verify_once(
                     "fixture_fallback": fixture_fallback,
                 },
             )
-            return VerificationResult(status="pass", issues=[], corrected_script_required=False), None
+            return _verification_unavailable(
+                "Verification prompt exceeded the model size limit."
+            ), None
         try:
             response = llm.generate_structured(
                 VERIFY_SYSTEM,
@@ -186,7 +190,7 @@ def _verify_once(
                     "fixture_fallback": allows_fixture_fallback(llm),
                 },
             )
-            return VerificationResult(status="pass", issues=[], corrected_script_required=False), None
+            return _verification_unavailable(f"Verification model failed: {exc}"), None
     return (
         VerificationResult(
             status="pass",
@@ -214,6 +218,23 @@ def _script_structure_failure(explanation: str) -> VerificationResult:
     )
 
 
+def _verification_unavailable(explanation: str) -> VerificationResult:
+    """A failed check is not evidence that the script is safe to publish."""
+    return VerificationResult(
+        status="fail",
+        issues=[
+            VerificationIssue(
+                severity="high",
+                category="verification_unavailable",
+                script_excerpt="",
+                explanation=explanation,
+                required_action="restore_verifier_and_retry",
+            )
+        ],
+        corrected_script_required=False,
+    )
+
+
 def _dump_optional_model(value: Any | None) -> Any | None:
     if value is None:
         return None
@@ -226,11 +247,7 @@ def compact_source_evidence(
     dossiers: list[StoryDossier],
     extractions: list[ExtractionResult],
 ) -> list[dict[str, Any]]:
-    relevant_ids = {
-        source_id
-        for dossier in dossiers
-        for source_id in dossier.source_ids
-    }
+    relevant_ids = {source_id for dossier in dossiers for source_id in dossier.source_ids}
     return [
         {
             "candidate_id": extraction.candidate_id,

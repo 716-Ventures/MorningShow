@@ -75,6 +75,8 @@ def synthesize_script(
     adapter: TTSAdapter | None = None,
 ) -> list[AudioMetadata]:
     voice, secondary = resolve_voices(production, profile)
+    if adapter is None and os.environ.get("MORNING_RADIO_FAKE_TTS") == "1":
+        voice = secondary = "tone"
     adapter = adapter or build_tts_adapter(production.tts.engine)
     available = set(adapter.available_voices())
     manifest: list[AudioMetadata] = []
