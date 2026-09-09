@@ -137,7 +137,17 @@ def _extraction_from_response(
             extraction_status="fetch_failed",
             failure_reason=f"HTTP {response.status_code}",
         )
-    extracted = trafilatura.extract(bytes(chunks), include_comments=False, include_tables=False)
+    try:
+        extracted = trafilatura.extract(bytes(chunks), include_comments=False, include_tables=False)
+    except (ValueError, TypeError) as exc:
+        return ExtractionResult(
+            candidate_id=candidate.candidate_id,
+            url=candidate.url,
+            final_url=final_url,
+            http_status=response.status_code,
+            extraction_status="parse_failed",
+            failure_reason=f"Article parser failed: {exc}",
+        )
     if not extracted:
         return ExtractionResult(
             candidate_id=candidate.candidate_id,

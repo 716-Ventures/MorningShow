@@ -50,6 +50,9 @@ def test_fixture_morning_run_completes_in_isolated_root(
     run_dir = root / "runs" / "2026-08-14" / result.run_id
     assert (run_dir / "episode.mp3").exists() == generate_audio
     assert (run_dir / "production-plan.json").exists() == generate_audio
+    metrics = json.loads((run_dir / "performance.json").read_text())
+    assert metrics["run_id"] == result.run_id
+    assert all(item["elapsed_ms"] >= 0 for item in metrics["stages"])
     extracted = sorted((run_dir / "extracted").glob("*.json"))
     statuses = {
         json.loads(path.read_text(encoding="utf-8"))["extraction_status"] for path in extracted
@@ -76,3 +79,6 @@ def test_fixture_morning_run_records_verification_failure(monkeypatch, tmp_path:
     run_dir = run_jsons[0].parent
     assert (run_dir / "verification.json").exists()
     assert not (run_dir / "raw-audio" / "001-host.wav").exists()
+    metrics = json.loads((run_dir / "performance.json").read_text())
+    assert metrics["stages"][-1]["status"] == "failed"
+    assert metrics["stages"][-1]["stage"] == "verifying"

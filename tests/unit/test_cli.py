@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from morning_radio.cli import app
@@ -113,3 +114,48 @@ def test_wheel_includes_explicit_subpackages(tmp_path: Path) -> None:
     assert "morning_radio/audio/__init__.py" in names
     assert "morning_radio/newsroom/__init__.py" in names
     assert "morning_radio/showgen/__init__.py" in names
+    assert "morning_radio/evaluation-cases.json" in names
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_doctor_isolated_config_and_dependencies(monkeypatch, tmp_path, valid):
+    import morning_radio.cli as cli
+    from morning_radio.dependencies import DependencyCheck
+
+    if valid:
+        shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+
+    def check(*args):
+        return [DependencyCheck("test dependency", True, "available")]
+
+    monkeypatch.setattr(cli, "check_llm", check)
+    monkeypatch.setattr(cli, "check_tts", check)
+    monkeypatch.setattr(cli, "check_ffmpeg", check)
+    result = CliRunner().invoke(app, ["doctor"])
+    assert result.exit_code == (0 if valid else 1)
+    assert "Config files" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["morning", "--minutes", "4"],
+        ["morning", "--minutes", "91"],
+        ["morning", "--date", "bad-date"],
+    ],
+)
+def test_bad_options_are_rejected(args):
+    assert CliRunner().invoke(app, args).exit_code == 2
+
+
+def test_configure_passes_existing_profile(monkeypatch):
+    import morning_radio.cli as cli
+    from morning_radio.profile.compiler import default_profile
+
+    profile = default_profile()
+    received = []
+    monkeypatch.setattr(cli, "load_profile", lambda: profile)
+    monkeypatch.setattr(cli, "run_interview", received.append)
+    assert CliRunner().invoke(app, ["configure"]).exit_code == 0
+    assert received == [profile]

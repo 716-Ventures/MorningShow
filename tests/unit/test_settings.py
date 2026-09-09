@@ -45,3 +45,25 @@ def test_invalid_numeric_boundary_fails(tmp_path: Path) -> None:
 def test_missing_config_fails(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         load_app_settings(tmp_path)
+
+
+@pytest.mark.parametrize("field,value", [("engine", "unknown"), ("speeed", 1.0)])
+def test_tts_config_rejects_unknown_values(tmp_path, field, value):
+    import json
+
+    copy_config(tmp_path)
+    production = load_production_settings(tmp_path).model_dump(mode="json")
+    production["tts"][field] = value
+    (tmp_path / "config/production.yaml").write_text(json.dumps(production))
+    with pytest.raises(ConfigError):
+        load_production_settings(tmp_path)
+
+
+@pytest.mark.parametrize("content", ["[1, 2]", "1: value", "false", "invalid: ["])
+def test_config_requires_valid_string_keyed_mapping(tmp_path, content):
+    from morning_radio.settings import load_yaml
+
+    path = tmp_path / "bad.yaml"
+    path.write_text(content)
+    with pytest.raises(ConfigError):
+        load_yaml(path)

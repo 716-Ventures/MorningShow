@@ -225,3 +225,71 @@ def test_async_download_stops_at_limit_and_closes_stream() -> None:
     asyncio.run(run())
     assert body.consumed == 3
     assert body.closed
+
+
+@pytest.mark.parametrize(
+    "status,kind,text,expected",
+    [
+        (200, "application/pdf", "body", "unsupported_content"),
+        (404, "text/html", "body", "fetch_failed"),
+        (200, "text/html", None, "parse_failed"),
+        (200, "text/html", "one", "too_short"),
+        (200, "text/html", "two words", "usable"),
+    ],
+)
+def test_article_result_states(monkeypatch, status, kind, text, expected):
+    settings = app_settings()
+    settings.news.minimum_article_words = 2
+    monkeypatch.setattr(extract_module.trafilatura, "extract", lambda *args, **kwargs: text)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: Response(status, headers={"content-type": kind}, content=b"html")
+        )
+    ) as client:
+        result = extract_module._extract_one(candidate("state"), settings, client)
+    assert result.extraction_status == expected
+
+
+def test_async_article_failure_isolated():
+    def fail(request):
+        raise httpx.ReadTimeout("slow source")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as client:
+            return await extract_module._extract_one_async(
+                candidate("timeout"), app_settings(), client, asyncio.Semaphore(1)
+            )
+
+    result = asyncio.run(run())
+    assert result.extraction_status == "fetch_failed"
+    assert result.failure_reason is not None
+    assert "slow source" in result.failure_reason
+
+
+def test_extraction_stage_persists_failures_before_raising(monkeypatch, tmp_path):
+    async def failed(*args):
+        return [
+            ExtractionResult(
+                candidate_id="failed", url="https://public.test", extraction_status="parse_failed"
+            )
+        ]
+
+    monkeypatch.setattr(extract_module, "extract_ranked_articles", failed)
+    with pytest.raises(extract_module.ExtractionStageError, match="Only 0"):
+        extract_module.extract_articles([candidate("failed")], app_settings(), tmp_path)
+    assert (tmp_path / "extracted/failed.json").exists()
+
+
+def test_parser_error_does_not_abort_other_articles(monkeypatch):
+    def fail(*args, **kwargs):
+        raise ValueError("bad document")
+
+    monkeypatch.setattr(extract_module.trafilatura, "extract", fail)
+    response = Response(
+        200,
+        content=b"html",
+        headers={"content-type": "text/html"},
+        request=httpx.Request("GET", "https://public.test"),
+    )
+    result = extract_module._extraction_from_response(candidate("broken"), app_settings(), response)
+    assert result.extraction_status == "parse_failed"

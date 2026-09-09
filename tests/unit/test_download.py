@@ -52,3 +52,29 @@ def test_async_redirect_rejects_private_ipv6_and_closes_response():
 
     asyncio.run(run())
     assert requests == ["http://93.184.216.34/start"]
+
+
+def test_total_deadline_stops_slow_stream_and_closes_it():
+    class SlowBody(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            for _ in range(20):
+                await asyncio.sleep(0.01)
+                yield b"x"
+
+        async def aclose(self):
+            self.closed = True
+
+    body = SlowBody()
+
+    async def run():
+        async with httpx.AsyncClient(
+            timeout=0.04,
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=body)),
+        ) as client:
+            with pytest.raises(httpx.ReadTimeout, match="total time"):
+                await get_checked_response_async("http://93.184.216.34/slow", client)
+
+    asyncio.run(run())
+    assert body.closed

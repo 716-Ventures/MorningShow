@@ -29,6 +29,7 @@ class LLMSettings(Configuration):
     base_url: HttpUrl
     model: str
     timeout_seconds: int = Field(gt=0)
+    thinking: bool | None = None
 
 
 class NewsSettings(Configuration):

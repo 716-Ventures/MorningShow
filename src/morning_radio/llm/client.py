@@ -93,6 +93,7 @@ class OllamaClient:
                 "system": system_prompt,
                 "prompt": user_prompt,
                 "stream": False,
+                **({"think": self.settings.thinking} if self.settings.thinking is not None else {}),
             }
             response = self._client.post(
                 f"{str(self.settings.base_url).rstrip('/')}/api/generate",
@@ -135,6 +136,11 @@ class OllamaClient:
                     ),
                     "prompt": prompt,
                     "stream": False,
+                    **(
+                        {"think": self.settings.thinking}
+                        if self.settings.thinking is not None
+                        else {}
+                    ),
                     "format": response_model.model_json_schema(),
                 }
                 response = self._client.post(

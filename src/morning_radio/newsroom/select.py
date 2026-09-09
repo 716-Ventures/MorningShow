@@ -33,7 +33,6 @@ def select_stories(
     selected: list[SelectedStory] = []
     rejected: list[SelectedStory] = []
     selected_ids: set[str] = set()
-    assigned_interests: set[str] = set()
     used_subjects: dict[str, int] = {}
     spent = 0
     has_profile_matches = any(score.matched_interests for score in scores)
@@ -53,6 +52,7 @@ def select_stories(
                 score
                 for score in scores
                 if score.cluster_id not in selected_ids
+                and (score.final_score >= 45 or score.relevance >= 60)
                 and any(name.casefold() == interest_key for name in score.matched_interests)
                 and not (
                     score.negative_matches
@@ -68,7 +68,6 @@ def select_stories(
             continue
         selected.append(as_selected_story(candidate, seconds))
         selected_ids.add(candidate.cluster_id)
-        assigned_interests.add(interest_key)
         subject = interest_key
         used_subjects[subject] = used_subjects.get(subject, 0) + 1
         spent += seconds
@@ -120,10 +119,16 @@ def select_stories(
         spent += seconds
     if not selected:
         raise RuntimeError("No stories survived selection.")
+    covered_interests = {
+        name.casefold()
+        for score in scores
+        if score.cluster_id in selected_ids
+        for name in score.matched_interests
+    }
     uncovered_interests = [
         interest.name
         for interest in profile.interests
-        if interest.name.casefold() not in assigned_interests
+        if interest.name.casefold() not in covered_interests
     ]
     result = SelectionResult(
         selected=selected,

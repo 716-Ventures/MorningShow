@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 
 from morning_radio.artifacts.io import atomic_write_json
@@ -41,10 +42,11 @@ AMBIGUOUS_SIMILARITY = 0.30
 TIME_BLOCK_HOURS = 36
 
 
-def title_tokens(title: str) -> set[str]:
+@lru_cache(maxsize=4096)
+def title_tokens(title: str) -> frozenset[str]:
     normalized = normalize_title(title)
     words = re.findall(r"[a-z0-9]+", normalized)
-    return {_stem_token(word) for word in words if len(word) > 2 and word not in STOPWORDS}
+    return frozenset(_stem_token(word) for word in words if len(word) > 2 and word not in STOPWORDS)
 
 
 def cluster_stories(
@@ -121,6 +123,7 @@ def cluster_stories(
     return clusters
 
 
+@lru_cache(maxsize=4096)
 def normalize_title(title: str) -> str:
     title = PUBLISHER_SUFFIX.sub("", title)
     return re.sub(r"\s+", " ", title.lower()).strip()
@@ -151,6 +154,8 @@ def should_merge(
     right_title = normalize_title(right.title)
     similarity = token_similarity(left, right)
     shared_tokens = title_tokens(left.title) & title_tokens(right.title)
+    if not within_time_block(left, right):
+        return False, similarity, None
     if left_title == right_title:
         return True, 1.0, None
     if similarity >= HIGH_CONFIDENCE_SIMILARITY and within_time_block(left, right):

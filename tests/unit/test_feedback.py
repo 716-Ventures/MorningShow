@@ -65,3 +65,49 @@ def test_record_feedback_rejects_incomplete_explicit_run_before_prompt(
 
     with pytest.raises(typer.BadParameter, match="not a completed run"):
         feedback.record_feedback("run-001", root=tmp_path)
+
+
+@pytest.mark.parametrize("owned", [True, False])
+@pytest.mark.parametrize("fails", [True, False])
+def test_feedback_client_ownership_and_failure(monkeypatch, tmp_path, owned, fails):
+    from morning_radio.llm.client import LLMError, OllamaClient
+    from morning_radio.settings import load_app_settings
+
+    class Client(OllamaClient):
+        def __init__(self):
+            self.model = "test"
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+        def generate_structured(self, *args, **kwargs):
+            if fails:
+                raise LLMError("failed")
+            return args[2](editorial_memory_markdown="Keep sources clear.")
+
+    client = Client()
+    monkeypatch.setattr(feedback, "load_app_settings", lambda root: load_app_settings())
+    monkeypatch.setattr(feedback, "build_llm_client", lambda *args: client)
+    if fails:
+        with pytest.raises(LLMError):
+            update_editorial_memory("old", answers(), tmp_path, None if owned else client)
+    else:
+        assert "Keep sources clear" in update_editorial_memory(
+            "old", answers(), tmp_path, None if owned else client
+        )
+    assert client.closed == owned
+
+
+def test_feedback_saves_history_and_memory_backup(monkeypatch, tmp_path):
+    from morning_radio.profile.compiler import memory_path
+
+    path = tmp_path / "data/app.db"
+    db.initialize(path)
+    db.record_run(path, "run-001", "2026-09-09", "complete", tmp_path / "run")
+    old = "# Editorial Memory\n\nOld rule.\n"
+    memory_path(tmp_path).write_text(old)
+    monkeypatch.setattr(typer, "prompt", lambda *args: "test answer")
+    feedback.record_feedback(root=tmp_path, llm=MemoryLLM())
+    assert memory_path(tmp_path).with_suffix(".md.bak").read_text() == old
+    assert "practical developer" in memory_path(tmp_path).read_text()

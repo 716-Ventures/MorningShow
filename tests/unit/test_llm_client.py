@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -69,3 +70,32 @@ def test_text_generation_logs_success(tmp_path: Path) -> None:
         result = client.generate_text("system", "user", stage="writing", prompt_type="test")
     assert result == "hello"
     assert (tmp_path / "logs" / "model-calls.jsonl").exists()
+
+
+def test_thinking_option_and_server_timing_metadata(tmp_path):
+    client = OllamaClient(
+        LLMSettings(
+            base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5, thinking=False
+        ),
+        tmp_path,
+    )
+    try:
+        with respx.mock as router:
+            route = router.post("http://ollama.test/api/generate").mock(
+                Response(
+                    200,
+                    json={
+                        "response": "ok",
+                        "load_duration": 100,
+                        "eval_count": 2,
+                        "eval_duration": 200,
+                    },
+                )
+            )
+            client.generate_text("system", "user", stage="test", prompt_type="test")
+        assert json.loads(route.calls[0].request.content)["think"] is False
+        metrics = json.loads((tmp_path / "logs/model-calls.jsonl").read_text())
+        assert metrics["load_duration_ns"] == 100
+        assert metrics["eval_count"] == 2
+    finally:
+        client.close()

@@ -85,3 +85,49 @@ def test_numeric_prompt_retries_invalid_input(monkeypatch):
     answers = iter(["bad", "100", "10"])
     monkeypatch.setattr(interview, "_ask", lambda *args: next(answers))
     assert interview._int("Minutes", 5, 90, 20) == 10
+
+
+def test_interest_entry_retries_empty_and_duplicate_names(monkeypatch):
+    responses = iter(
+        [
+            "",
+            "AI",
+            "5",
+            "deep",
+            "tools",
+            "done",
+            "include tools",
+            "avoid hype",
+            "ai",
+            "Apple",
+            "3",
+            "normal",
+            "",
+            "",
+            "done",
+        ]
+    )
+    monkeypatch.setattr(interview, "_ask", lambda *args: next(responses))
+    interests = interview._collect_interests(default_profile())
+    assert [item["name"] for item in interests] == ["AI", "Apple"]
+    assert interests[0]["subtopics"] == ["tools"]
+
+
+def test_exclusions_and_fixed_format(monkeypatch):
+    values = iter(["", "celebrity", "done"])
+    monkeypatch.setattr(interview, "_ask", lambda *args: next(values))
+    assert interview._collect_exclusions([]) == ["celebrity"]
+    monkeypatch.setattr(interview, "_confirm", lambda *args: False)
+    monkeypatch.setattr(interview, "_int", lambda prompt, minimum, maximum, default: default)
+    result = ShowFormat.model_validate(interview._collect_format(default_profile()))
+    assert result.minimum_minutes == result.maximum_minutes == result.target_minutes
+
+
+def test_prompt_wrappers_use_defaults_and_retry_choices(monkeypatch):
+    monkeypatch.setattr(interview.typer, "prompt", lambda *args, **kwargs: "  ")
+    assert interview._ask("Home", "Buffalo") == "Buffalo"
+    monkeypatch.setattr(interview.typer, "confirm", lambda *args, **kwargs: kwargs["default"])
+    assert not interview._confirm("News", False)
+    answers = iter(["not a choice", "changes only"])
+    monkeypatch.setattr(interview, "_ask", lambda *args: next(answers))
+    assert interview._choice("Policy", {"changes_only"}, "changes_only") == "changes_only"

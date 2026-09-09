@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from morning_radio import db
 from morning_radio.artifacts.io import atomic_write_json as write_atomic_json
 from morning_radio.logging import log_line
 from morning_radio.models import LEGAL_TRANSITIONS, RunRecord, StageStatus
+from morning_radio.performance import Measurement, peak_memory, write_performance
 from morning_radio.settings import repo_root
 
 
@@ -31,6 +33,8 @@ class RunContext:
     run_dir: Path
     record: RunRecord
     stage_started_at: datetime | None = None
+    stage_started_clock: float | None = None
+    measurements: list[Measurement] = field(default_factory=list)
 
     @property
     def run_json_path(self) -> Path:
@@ -46,6 +50,7 @@ class RunContext:
         self.record.status = status
         self.save()
         self.stage_started_at = datetime.now().astimezone()
+        self.stage_started_clock = time.monotonic()
         log_line(self.run_dir, f"stage={status.value} status=started")
 
     def register_artifact(self, name: str, path: Path) -> None:
@@ -84,6 +89,19 @@ class RunContext:
             elapsed = datetime.now(UTC) - self.stage_started_at.astimezone(UTC)
             elapsed_ms = f" elapsed_ms={round(elapsed.total_seconds() * 1000)}"
         log_line(self.run_dir, f"stage={self.record.status.value} status={status}{elapsed_ms}")
+        if self.stage_started_clock is not None:
+            self.measurements.append(
+                Measurement(
+                    stage=self.record.status.value,
+                    status=status,
+                    elapsed_ms=(time.monotonic() - self.stage_started_clock) * 1000,
+                    **peak_memory(),
+                )
+            )
+            write_performance(
+                self.run_dir / "performance.json", self.record.run_id, self.measurements
+            )
+            self.stage_started_clock = None
 
 
 def create_run(requested_date: date, target_minutes: int, root: Path | None = None) -> RunContext:

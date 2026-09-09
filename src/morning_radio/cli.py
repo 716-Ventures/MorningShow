@@ -73,7 +73,7 @@ def doctor() -> None:
     try:
         db.initialize(base / "data" / "app.db")
         checks.append(("SQLite initialization", True, "data/app.db ready"))
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, OSError) as exc:
         checks.append(("SQLite initialization", False, str(exc)))
 
     if app_settings is not None:

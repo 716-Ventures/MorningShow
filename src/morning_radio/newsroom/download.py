@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import zlib
 from urllib.parse import urljoin
 
@@ -59,7 +60,7 @@ def buffered_response(response: httpx.Response, body: bytes) -> httpx.Response:
     )
 
 
-def read_body(response: httpx.Response, limit: int) -> bytes:
+def read_body(response: httpx.Response, limit: int, deadline: float | None = None) -> bytes:
     # Prebuffered responses are used by injected test transports only.
     if response.is_stream_consumed:
         if len(response.content) > limit:
@@ -67,6 +68,8 @@ def read_body(response: httpx.Response, limit: int) -> bytes:
         return response.content
     body = BoundedBody(response.headers.get("content-encoding", ""), limit)
     for chunk in response.iter_raw():
+        if deadline is not None and time.monotonic() >= deadline:
+            raise httpx.ReadTimeout("Download exceeded total time limit")
         body.append(chunk)
     return body.finish()
 
@@ -91,6 +94,7 @@ def get_checked_response(
     url: str, client: httpx.Client, *, max_bytes: int = 2_000_000
 ) -> httpx.Response:
     visited: set[str] = set()
+    deadline = time.monotonic() + (client.timeout.read or 30)
     for _ in range(MAX_REDIRECTS + 1):
         assert_safe_public_url(url)
         if url in visited:
@@ -100,7 +104,7 @@ def get_checked_response(
             "GET", url, follow_redirects=False, headers={"Accept-Encoding": "gzip, deflate"}
         ) as response:
             if response.status_code not in REDIRECTS:
-                return buffered_response(response, read_body(response, max_bytes))
+                return buffered_response(response, read_body(response, max_bytes, deadline))
             url = next_redirect(response, url)
     raise UnsafeUrlError(f"Redirect limit exceeded after {MAX_REDIRECTS} redirects")
 
@@ -108,6 +112,14 @@ def get_checked_response(
 async def get_checked_response_async(
     url: str, client: httpx.AsyncClient, *, max_bytes: int = 2_000_000
 ) -> httpx.Response:
+    try:
+        async with asyncio.timeout(client.timeout.read or 30):
+            return await _download_async(url, client, max_bytes)
+    except TimeoutError as exc:
+        raise httpx.ReadTimeout("Download exceeded total time limit") from exc
+
+
+async def _download_async(url: str, client: httpx.AsyncClient, max_bytes: int) -> httpx.Response:
     visited: set[str] = set()
     for _ in range(MAX_REDIRECTS + 1):
         await asyncio.to_thread(assert_safe_public_url, url)
