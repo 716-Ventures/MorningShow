@@ -22,12 +22,22 @@ from morning_radio.showgen.script import (
     ScriptError,
     estimate_spoken_seconds,
     finalize_script,
+    has_headline_lead,
     normalize_script_format,
+    remove_redundant_lead,
     spoken_blocks,
     validate_script,
     validate_script_quality,
     write_script,
 )
+
+
+def test_headline_removal_preserves_sentence_subject():
+    body = "Apple announced a new phone today."
+    assert not has_headline_lead(body, "Apple")
+    assert remove_redundant_lead(body, "Apple") == body
+    assert remove_redundant_lead("Apple: " + body, "Apple") == body
+    assert remove_redundant_lead("Apple. " + body, "Apple.") == body
 
 
 class FailingScriptLLM:

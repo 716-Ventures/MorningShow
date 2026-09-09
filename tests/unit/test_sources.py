@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
+import pytest
+
 from morning_radio.artifacts.sources import scripted_source_order, write_sources_page
 from morning_radio.models import (
     CandidateStory,
@@ -14,12 +16,13 @@ from morning_radio.models import (
 )
 
 
-def test_sources_page_escapes_external_text(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source_url", ["https://example.com/a?x=1&y=2", "javascript:alert(1)"])
+def test_sources_page_escapes_external_text(tmp_path: Path, source_url: str) -> None:
     candidate = CandidateStory(
         candidate_id="a",
         feed_id="feed",
         title="<script>alert(1)</script>",
-        url="https://example.com/a?x=1&y=2",
+        url=source_url,
         retrieved_at=datetime.now().astimezone(),
         publisher="<b>Publisher</b>",
     )
@@ -62,6 +65,7 @@ def test_sources_page_escapes_external_text(tmp_path: Path) -> None:
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "A thing happened" not in html
+    assert "href='javascript:" not in html
 
 
 def test_sources_page_uses_final_script_order_and_supported_sources(tmp_path: Path) -> None:

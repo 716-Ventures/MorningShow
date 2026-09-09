@@ -255,11 +255,9 @@ def remove_story_headline_leads(script: str, dossiers: list[StoryDossier]) -> st
                 line = line[len(prefix) :].lstrip()
                 break
         for title in titles:
-            if not line.casefold().startswith(title.casefold()):
+            if not has_headline_lead(line, title):
                 continue
             remainder = line[len(title) :]
-            if remainder and remainder[0] not in " .:!?-":
-                continue
             line = remainder.lstrip(" .:!?-")
             break
         if line:
@@ -344,11 +342,7 @@ def validate_story_openings(script: str, dossiers: list[StoryDossier]) -> None:
         lowered = text.casefold()
         if any(lowered.startswith(f"{transition.casefold()}:") for transition in STORY_TRANSITIONS):
             raise ScriptError("Story copy may not begin with a headline-style transition.")
-        if any(
-            lowered.startswith(title)
-            and (len(lowered) == len(title) or lowered[len(title)] in " .:!?-")
-            for title in titles
-        ):
+        if any(has_headline_lead(lowered, title) for title in titles):
             raise ScriptError("Story copy may not begin by reading its headline.")
 
 
@@ -417,7 +411,9 @@ def validate_script_quality(
 
 def story_script_paragraph(dossier: StoryDossier) -> str:
     title = clean_spoken_copy(dossier.working_headline)
-    what_happened = remove_redundant_lead(clean_spoken_copy(dossier.what_happened), title)
+    what_happened = clean_spoken_copy(
+        remove_redundant_lead(dossier.what_happened, dossier.working_headline)
+    )
     what_is_new = meaningful_dossier_copy(dossier.what_is_new_today)
     why_it_matters = meaningful_dossier_copy(dossier.why_it_matters)
     details = _distinct_sentences([what_happened, what_is_new, why_it_matters], title)
@@ -517,14 +513,18 @@ def clean_spoken_copy(text: str) -> str:
     return " ".join(cleaned.split()).strip()
 
 
+def has_headline_lead(text: str, title: str) -> bool:
+    """Require a headline boundary, not merely a shared sentence subject."""
+    if not title or not text.casefold().startswith(title.casefold()):
+        return False
+    remainder = text[len(title) :].lstrip()
+    return not remainder or title[-1] in ".:!?" or remainder[0] in ".:!?-"
+
+
 def remove_redundant_lead(text: str, title: str) -> str:
     if not text:
         return ""
-    normalized_text = text.casefold()
-    normalized_title = title.casefold()
-    if normalized_text == normalized_title:
-        return ""
-    if normalized_text.startswith(normalized_title):
+    if has_headline_lead(text, title):
         trimmed = text[len(title) :].lstrip(" .:-")
         return trimmed
     return text

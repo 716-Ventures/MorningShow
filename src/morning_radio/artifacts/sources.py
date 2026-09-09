@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.models import CandidateStory, Cluster, Rundown, StoryDossier
@@ -39,10 +40,17 @@ def write_sources_page(
             publisher = html.escape(candidate.publisher or candidate.feed_id)
             title = html.escape(candidate.title)
             url = html.escape(candidate.url, quote=True)
+            try:
+                parsed_url = urlsplit(candidate.url)
+                linkable = parsed_url.scheme.casefold() in {"http", "https"} and bool(
+                    parsed_url.hostname
+                )
+            except ValueError:
+                linkable = False
+            source_title = f"<a href='{url}'>{title}</a>" if linkable else title
             retrieved = html.escape(candidate.retrieved_at.isoformat())
             parts.append(
-                f"<li><a href='{url}'>{title}</a> — {publisher} "
-                f"<small>retrieved {retrieved}</small></li>"
+                f"<li>{source_title} — {publisher} <small>retrieved {retrieved}</small></li>"
             )
         parts.append("</ul></section>")
     parts.append("</body></html>")

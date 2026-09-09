@@ -86,10 +86,14 @@ def build_dossiers(
                     prompt_type="story_dossier",
                 )
                 model_dossier = _restore_source_ids(response.dossier, source_aliases)
-                if _valid_source_ids(
-                    model_dossier,
-                    {source.candidate_id for source in sources},
-                ) and _is_substantive(model_dossier):
+                if (
+                    model_dossier.cluster_id == cluster.cluster_id
+                    and _valid_source_ids(
+                        model_dossier,
+                        set(source_aliases.values()),
+                    )
+                    and _is_substantive(model_dossier)
+                ):
                     dossier = model_dossier
                     atomic_write_json(
                         dossier_dir / f"{cluster.cluster_id}.json",
@@ -224,9 +228,10 @@ def _restore_source_ids(
         )
         for fact in dossier.facts
     ]
-    return dossier.model_copy(
-        update={
-            "facts": facts,
+    return StoryDossier.model_validate(
+        {
+            **dossier.model_dump(),
+            "facts": [fact.model_dump() for fact in facts],
             "source_ids": [restore(source_id) for source_id in dossier.source_ids],
         }
     )

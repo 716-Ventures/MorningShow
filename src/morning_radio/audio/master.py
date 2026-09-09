@@ -59,8 +59,10 @@ def measure_loudness(ffmpeg: str, source: Path, run_dir: Path) -> float:
         raise AudioMasterError(f"Cannot measure loudness of {source}") from exc
 
 
-def usable_asset(ffmpeg: str, source: Path, optional: bool, run_dir: Path) -> bool:
-    level = measure_loudness(ffmpeg, source, run_dir)
+def usable_asset(
+    ffmpeg: str, source: Path, optional: bool, run_dir: Path, *, input_lufs: float | None = None
+) -> bool:
+    level = measure_loudness(ffmpeg, source, run_dir) if input_lufs is None else input_lufs
     if math.isfinite(level) and level >= -40:
         return True
     message = f"Audio asset {source} measures {level:.1f} LUFS; re-export at normal music level."
@@ -100,8 +102,18 @@ def mix_and_master(
     concat_list = run_dir / "mix" / "concat.txt"
     files: list[Path] = []
     pause_index = 0
+    asset_seconds = 0.0
     rendered_index = 0
     active_bed: Path | None = None
+    # A render owns immutable inputs; never retain measurements across runs.
+    levels: dict[Path, float] = {}
+
+    def level(source: Path) -> float:
+        source = source.resolve()
+        if source not in levels:
+            levels[source] = measure_loudness(ffmpeg, source, run_dir)
+        return levels[source]
+
     trim_next_speech_leading = False
     for item in typed_plan:
         if isinstance(item, SpeechItem):
@@ -117,6 +129,7 @@ def mix_and_master(
                     production,
                     run_dir,
                     trim_leading=trim_next_speech_leading,
+                    input_lufs=level(item.path),
                 )
             else:
                 mix_bed_under_speech(
@@ -127,6 +140,7 @@ def mix_and_master(
                     production,
                     run_dir,
                     trim_speech_leading=trim_next_speech_leading,
+                    input_lufs=level(item.path),
                 )
             trim_next_speech_leading = False
             files.append(rendered)
@@ -145,7 +159,9 @@ def mix_and_master(
                 continue
             if item.path is None:
                 raise AudioMasterError(f"Production item has no asset path: {item.directive}")
-            if not usable_asset(ffmpeg, item.path, item.optional, run_dir):
+            if not usable_asset(
+                ffmpeg, item.path, item.optional, run_dir, input_lufs=level(item.path)
+            ):
                 continue
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-{item.type}.wav"
@@ -159,9 +175,12 @@ def mix_and_master(
                 production,
                 run_dir,
                 trim_trailing=is_opening,
+                input_lufs=level(item.path),
             )
             if is_opening:
                 trim_next_speech_leading = True
+            with wave.open(str(rendered), "rb") as handle:
+                asset_seconds += handle.getnframes() / handle.getframerate()
             files.append(rendered)
         elif isinstance(item, BedStartItem):
             if item.skipped:
@@ -169,12 +188,16 @@ def mix_and_master(
                 continue
             if item.path is None:
                 raise AudioMasterError(f"Bed item has no asset path: {item.directive}")
-            if not usable_asset(ffmpeg, item.path, item.optional, run_dir):
+            if not usable_asset(
+                ffmpeg, item.path, item.optional, run_dir, input_lufs=level(item.path)
+            ):
                 active_bed = None
                 continue
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-bed.wav"
-            normalize_audio(ffmpeg, item.path, rendered, production, run_dir)
+            normalize_audio(
+                ffmpeg, item.path, rendered, production, run_dir, input_lufs=level(item.path)
+            )
             active_bed = rendered
         elif isinstance(item, BedStopItem):
             active_bed = None
@@ -229,7 +252,8 @@ def mix_and_master(
     )
     probe_json = run_probe(ffprobe, episode, run_dir)
     atomic_write_json(run_dir / "mix" / "final-ffprobe.json", probe_json)
-    validate_final_mp3(episode, probe_json, planned_seconds, production)
+    expected_seconds = None if planned_seconds is None else planned_seconds + round(asset_seconds)
+    validate_final_mp3(episode, probe_json, expected_seconds, production)
     return episode
 
 
@@ -263,10 +287,14 @@ def normalize_audio(
     *,
     trim_leading: bool = False,
     trim_trailing: bool = False,
+    input_lufs: float | None = None,
 ) -> None:
     filters = [
         silence_trim_filter(leading=trim_leading, trailing=trim_trailing),
-        loudness_filter(production, measure_loudness(ffmpeg, source, run_dir)),
+        loudness_filter(
+            production,
+            measure_loudness(ffmpeg, source, run_dir) if input_lufs is None else input_lufs,
+        ),
     ]
     audio_filter = ",".join(item for item in filters if item is not None)
     run_command(
@@ -327,11 +355,15 @@ def mix_bed_under_speech(
     run_dir: Path,
     *,
     trim_speech_leading: bool = False,
+    input_lufs: float | None = None,
 ) -> None:
     layout = "mono" if production.audio.channels == 1 else "stereo"
     speech_filters = [
         silence_trim_filter(leading=trim_speech_leading, trailing=False),
-        loudness_filter(production, measure_loudness(ffmpeg, speech, run_dir)),
+        loudness_filter(
+            production,
+            measure_loudness(ffmpeg, speech, run_dir) if input_lufs is None else input_lufs,
+        ),
     ]
     speech_filter = ",".join(item for item in speech_filters if item is not None)
     run_command(
@@ -369,9 +401,8 @@ def mix_bed_under_speech(
 def run_command(command: list[str], run_dir: Path, label: str) -> None:
     command_log = run_dir / "mix" / "ffmpeg-commands.jsonl"
     command_log.parent.mkdir(parents=True, exist_ok=True)
-    command_log.open("a", encoding="utf-8").write(
-        json.dumps({"label": label, "command": command}, ensure_ascii=False) + "\n"
-    )
+    with command_log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"label": label, "command": command}, ensure_ascii=False) + "\n")
     stderr_path = run_dir / "mix" / f"{label}-stderr.txt"
     try:
         result = subprocess.run(
@@ -380,7 +411,11 @@ def run_command(command: list[str], run_dir: Path, label: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=600,
         )
+    except subprocess.TimeoutExpired as exc:
+        atomic_write_text(stderr_path, str(exc))
+        raise AudioMasterError(f"FFmpeg timed out for {label}; see {stderr_path}") from exc
     except OSError as exc:
         atomic_write_text(stderr_path, str(exc))
         raise AudioMasterError(
@@ -398,9 +433,10 @@ def run_probe(ffprobe: str, episode: Path, run_dir: Path) -> dict[str, Any]:
     command = [ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(episode)]
     command_log = run_dir / "mix" / "ffmpeg-commands.jsonl"
     command_log.parent.mkdir(parents=True, exist_ok=True)
-    command_log.open("a", encoding="utf-8").write(
-        json.dumps({"label": "ffprobe", "command": command}, ensure_ascii=False) + "\n"
-    )
+    with command_log.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps({"label": "ffprobe", "command": command}, ensure_ascii=False) + "\n"
+        )
     stderr_path = run_dir / "mix" / "ffprobe-stderr.txt"
     try:
         probe = subprocess.run(
@@ -408,7 +444,11 @@ def run_probe(ffprobe: str, episode: Path, run_dir: Path) -> dict[str, Any]:
             check=False,
             capture_output=True,
             text=True,
+            timeout=30,
         )
+    except subprocess.TimeoutExpired as exc:
+        atomic_write_text(stderr_path, str(exc))
+        raise AudioMasterError(f"FFprobe timed out; see {stderr_path}") from exc
     except OSError as exc:
         atomic_write_text(stderr_path, str(exc))
         raise AudioMasterError(f"FFprobe could not start; see {stderr_path}: {exc}") from exc

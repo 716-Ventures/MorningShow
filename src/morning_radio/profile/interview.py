@@ -66,89 +66,31 @@ def _collect_profile(base: EditorialProfile, has_existing: bool) -> EditorialPro
     home = _ask("Where are you based?", base.location.home)
     local_scope = _ask("What counts as local for you?", base.location.local_scope)
 
-    interests = []
-    seen = set()
     console.print("\nAdd interests one at a time.")
-    while True:
-        name = _ask("Interest name, or done")
-        if name.lower() == "done":
-            break
-        if not name:
-            console.print("Interest name cannot be empty.")
-            continue
-        key = name.casefold()
-        if key in seen:
-            console.print("That interest is already listed.")
-            continue
-        seen.add(key)
-        priority = _int(f"Priority for {name} (1-5)", 1, 5, 3)
-        depth = _choice(
-            f"Depth for {name}: major_only, normal, or deep",
-            {"major_only", "normal", "deep"},
-            "deep" if priority >= 4 else "normal",
-        )
-        subtopics = []
-        if priority >= 4:
-            console.print("Add subtopics for high-priority interests.")
-            while True:
-                subtopic = _ask("Subtopic, or done")
-                if subtopic.lower() == "done":
-                    break
-                if subtopic:
-                    subtopics.append(subtopic)
-        interests.append(
-            {
-                "name": name,
-                "priority": priority,
-                "depth": depth,
-                "subtopics": subtopics,
-                "inclusion_notes": _ask("Anything to include for this interest?", ""),
-                "exclusion_notes": _ask("Anything to avoid for this interest?", ""),
-            }
-        )
-
-    if not interests:
-        interests = [item.model_dump() for item in base.interests]
-
-    include_us = _confirm("Include major U.S. news outside stated interests?", True)
-    include_world = _confirm("Include major world news outside stated interests?", True)
-
-    negative_preferences = []
-    while True:
-        item = _ask("Subject to exclude, or done")
-        if item.lower() == "done":
-            break
-        if item:
-            negative_preferences.append(item)
+    interests = _collect_interests(base)
+    include_us = _confirm(
+        "Include major U.S. news outside stated interests?", base.global_news.include_major_us
+    )
+    include_world = _confirm(
+        "Include major world news outside stated interests?", base.global_news.include_major_world
+    )
+    negative_preferences = _collect_exclusions(base.negative_preferences)
 
     context_level = _choice(
         "Desired depth: summary, context, or analysis",
         {"summary", "context", "analysis"},
         base.editorial_style.context_level,
     )
-    assume_familiarity = _confirm("Assume familiarity with high-priority subjects?", True)
+    assume_familiarity = _confirm(
+        "Assume familiarity with high-priority subjects?",
+        base.editorial_style.assume_subject_familiarity,
+    )
     ongoing = _choice(
         "Ongoing-story policy: changes_only, brief_updates, or always_context",
         {"changes_only", "brief_updates", "always_context"},
         base.editorial_style.ongoing_story_policy,
     )
-    variable = _confirm("Allow variable show length?", base.show_format.allow_variable_length)
-    if variable:
-        minimum = _int("Minimum minutes", 5, 90, base.show_format.minimum_minutes)
-        maximum = _int("Maximum minutes", minimum, 90, base.show_format.maximum_minutes)
-        target = _int("Normal target minutes", minimum, maximum, base.show_format.target_minutes)
-    else:
-        target = _int("Fixed show minutes", 5, 90, base.show_format.target_minutes)
-        minimum = target
-        maximum = target
-
-    headline_open = _confirm(
-        "Include top-of-show headline rundown?", base.show_format.headline_open
-    )
-    watch_list_close = _confirm(
-        "Include closing what-to-watch section?", base.show_format.watch_list_close
-    )
-    host_count = _int("One host or two hosts?", 1, 2, base.show_format.host_count)
+    show_format = _collect_format(base)
 
     profile = EditorialProfile.model_validate(
         {
@@ -170,15 +112,7 @@ def _collect_profile(base: EditorialProfile, has_existing: bool) -> EditorialPro
                 "tone": "conversational_intelligent",
                 "avoid_padding": True,
             },
-            "show_format": {
-                "target_minutes": target,
-                "minimum_minutes": minimum,
-                "maximum_minutes": maximum,
-                "allow_variable_length": variable,
-                "headline_open": headline_open,
-                "watch_list_close": watch_list_close,
-                "host_count": host_count,
-            },
+            "show_format": show_format,
             "voice_preferences": base.voice_preferences.model_dump(),
         }
     )
@@ -314,9 +248,16 @@ def _collect_exclusions(defaults: list[str]) -> list[str]:
 def _collect_format(base: EditorialProfile) -> dict:
     variable = _confirm("Allow variable show length?", base.show_format.allow_variable_length)
     if variable:
-        minimum = _int("Minimum minutes", 5, 90, base.show_format.minimum_minutes)
-        maximum = _int("Maximum minutes", minimum, 90, base.show_format.maximum_minutes)
-        target = _int("Normal target minutes", minimum, maximum, base.show_format.target_minutes)
+        minimum = _int("Minimum minutes", 5, 89, min(89, base.show_format.minimum_minutes))
+        maximum = _int(
+            "Maximum minutes", minimum + 1, 90, max(minimum + 1, base.show_format.maximum_minutes)
+        )
+        target = _int(
+            "Normal target minutes",
+            minimum,
+            maximum,
+            max(minimum, min(maximum, base.show_format.target_minutes)),
+        )
     else:
         target = _int("Fixed show minutes", 5, 90, base.show_format.target_minutes)
         minimum = target

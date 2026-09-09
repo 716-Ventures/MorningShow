@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -243,10 +244,11 @@ def test_master_trims_only_opener_to_first_speech_transition(
         *,
         trim_leading: bool = False,
         trim_trailing: bool = False,
+        input_lufs: float | None = None,
     ) -> None:
         normalizations.append((source.name, trim_leading, trim_trailing))
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"audio")
+        master_module.write_silence(output, 1000)
 
     def fake_run_command(command: list[str], _run_dir: Path, _label: str) -> None:
         Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
@@ -407,3 +409,18 @@ def test_run_probe_rejects_invalid_json_with_diagnostics(tmp_path: Path) -> None
         run_probe("/bin/echo", episode, tmp_path)
 
     assert (tmp_path / "mix" / "ffprobe-stderr.txt").exists()
+
+
+@pytest.mark.parametrize("probe_command", [False, True])
+def test_subprocess_timeouts_have_diagnostics(tmp_path, monkeypatch, probe_command):
+    def timeout(command, **kwargs):
+        assert kwargs["timeout"] > 0
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(master_module.subprocess, "run", timeout)
+    with pytest.raises(AudioMasterError, match="timed out"):
+        if probe_command:
+            run_probe("ffprobe", tmp_path / "episode.mp3", tmp_path)
+        else:
+            run_command(["ffmpeg"], tmp_path, "timeout")
+    assert list((tmp_path / "mix").glob("*-stderr.txt"))

@@ -149,6 +149,17 @@ def test_restore_source_ids_maps_short_model_aliases() -> None:
     assert restored.facts[0].supporting_candidate_ids == ["candidate-001"]
 
 
+def test_restored_source_aliases_are_revalidated() -> None:
+    dossier = StoryDossier.model_validate(
+        _dossier_payload(
+            facts=[{"claim": "Fact.", "supporting_candidate_ids": ["source-1", "candidate-001"]}],
+            source_ids=["source-1", "candidate-001"],
+        )
+    )
+    with pytest.raises(ValidationError):
+        _restore_source_ids(dossier, {"source-1": "candidate-001"})
+
+
 def test_unsafe_dossier_backfills_from_unused_high_score_story(tmp_path) -> None:
     clusters = [
         Cluster(
