@@ -44,6 +44,12 @@ The full-episode source set is separate from the terse plumbing fixtures: three 
 
 ## Reproduction
 
+### Subsequent Real-News Verification Incident
+
+Run `20260909T135303-5705dd` did not originally fail on a factual finding: its 37,755-character verification request timed out after 300 seconds. The CLI incorrectly described that as high-severity editorial issues and advised removing unsupported claims. Commits `33ec254` and `f2ec264` introduce bounded passage checks plus a whole-script editorial check, preserve the episode date, normalize plain-text passage corrections under the existing host, and distinguish unavailable verification from content rejection. Every correction is still reverified; timeouts and exhausted correction cycles continue to block publication.
+
+The saved six-story script was replayed in the isolated `runs/benchmarks/verification-replay-20260909T154414` workspace. Requests completed without timeouts, but the replay reached the correction-cycle limit over disputed Suno copy, so no verified final episode was produced. This replay preceded the additional date-context/prompt refinement in `f2ec264`; that refinement has regression coverage, not a claimed successful full live replay. The latest automated baseline is **303 passing tests, 89.48% coverage**, with clean lint, formatting, and Pyright. Original run artifacts and listener configuration/profile files were preserved.
+
 Implementation commits, pushed in focused batches: `87d1155` (beds), `9547b3c` (network/types), `b09b376` (evaluation/metrics/regressions), `8b906d2` (full-episode/scoring), `81697ea` (topic budgets/duration overrides), and `75af404` (fallback time budgets). Operator changes in `config/app.yaml`, `data/profile.json`, and `data/profile.md` were not included.
 
 ```bash
