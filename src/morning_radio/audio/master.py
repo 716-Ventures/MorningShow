@@ -99,12 +99,13 @@ def mix_and_master(
     if not ffmpeg or not ffprobe:
         raise AudioMasterError("FFmpeg and FFprobe are required to export episode.mp3.")
     typed_plan = coerce_production_plan(plan)
-    concat_list = run_dir / "mix" / "concat.txt"
     files: list[Path] = []
     pause_index = 0
     asset_seconds = 0.0
     rendered_index = 0
     active_bed: Path | None = None
+    bed_start = 0
+    bed_region = 0
     # A render owns immutable inputs; never retain measurements across runs.
     levels: dict[Path, float] = {}
 
@@ -114,6 +115,21 @@ def mix_and_master(
             levels[source] = measure_loudness(ffmpeg, source, run_dir)
         return levels[source]
 
+    def finish_bed() -> None:
+        nonlocal active_bed, bed_region
+        if active_bed is not None and len(files) > bed_start:
+            bed_region += 1
+            dry = run_dir / "mix" / f"bed-region-{bed_region:03d}-dry.wav"
+            mixed = dry.with_name(f"bed-region-{bed_region:03d}-mixed.wav")
+            concatenate_audio(ffmpeg, files[bed_start:], dry, production, run_dir)
+            # Clips are already normalized. One overlay preserves the bed cursor
+            # through every chunk and pause without amplifying the dry mix again.
+            mix_bed_under_speech(
+                ffmpeg, dry, active_bed, mixed, production, run_dir, input_lufs=float("-inf")
+            )
+            files[bed_start:] = [mixed]
+        active_bed = None
+
     trim_next_speech_leading = False
     for item in typed_plan:
         if isinstance(item, SpeechItem):
@@ -121,27 +137,15 @@ def mix_and_master(
                 raise AudioMasterError("Speech item has no synthesized audio path.")
             rendered_index += 1
             rendered = run_dir / "mix" / f"rendered-{rendered_index:03d}-speech.wav"
-            if active_bed is None:
-                normalize_audio(
-                    ffmpeg,
-                    item.path,
-                    rendered,
-                    production,
-                    run_dir,
-                    trim_leading=trim_next_speech_leading,
-                    input_lufs=level(item.path),
-                )
-            else:
-                mix_bed_under_speech(
-                    ffmpeg,
-                    item.path,
-                    active_bed,
-                    rendered,
-                    production,
-                    run_dir,
-                    trim_speech_leading=trim_next_speech_leading,
-                    input_lufs=level(item.path),
-                )
+            normalize_audio(
+                ffmpeg,
+                item.path,
+                rendered,
+                production,
+                run_dir,
+                trim_leading=trim_next_speech_leading,
+                input_lufs=level(item.path),
+            )
             trim_next_speech_leading = False
             files.append(rendered)
         elif isinstance(item, PauseItem):
@@ -183,6 +187,8 @@ def mix_and_master(
                 asset_seconds += handle.getnframes() / handle.getframerate()
             files.append(rendered)
         elif isinstance(item, BedStartItem):
+            finish_bed()
+            bed_start = len(files)
             if item.skipped:
                 active_bed = None
                 continue
@@ -200,36 +206,15 @@ def mix_and_master(
             )
             active_bed = rendered
         elif isinstance(item, BedStopItem):
-            active_bed = None
+            finish_bed()
         else:
             raise AudioMasterError(f"Unsupported production item: {item!r}")
+    finish_bed()
     if not files:
         raise AudioMasterError("Production plan did not render any audio.")
-    atomic_write_text(
-        concat_list,
-        "".join(f"file '{escape_concat_path(path.resolve())}'\n" for path in files),
-    )
     intermediate = run_dir / "mix" / "program.wav"
     episode = run_dir / "episode.mp3"
-    run_command(
-        [
-            ffmpeg,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_list),
-            "-ar",
-            str(production.audio.sample_rate_hz),
-            "-ac",
-            str(production.audio.channels),
-            str(intermediate),
-        ],
-        run_dir,
-        "concat",
-    )
+    concatenate_audio(ffmpeg, files, intermediate, production, run_dir)
     run_command(
         [
             ffmpeg,
@@ -255,6 +240,36 @@ def mix_and_master(
     expected_seconds = None if planned_seconds is None else planned_seconds + round(asset_seconds)
     validate_final_mp3(episode, probe_json, expected_seconds, production)
     return episode
+
+
+def concatenate_audio(
+    ffmpeg: str, files: list[Path], output: Path, production: ProductionSettings, run_dir: Path
+) -> None:
+    manifest = output.with_suffix(".concat.txt")
+    atomic_write_text(
+        manifest, "".join(f"file '{escape_concat_path(path.resolve())}'\n" for path in files)
+    )
+    run_command(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(manifest),
+            "-ar",
+            str(production.audio.sample_rate_hz),
+            "-ac",
+            str(production.audio.channels),
+            "-c:a",
+            "pcm_s16le",
+            str(output),
+        ],
+        run_dir,
+        f"concat-{output.stem}",
+    )
 
 
 def metadata_args(episode_title: str, episode_date: str | None) -> list[str]:
