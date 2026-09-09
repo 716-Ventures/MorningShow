@@ -21,6 +21,7 @@ class OllamaResponse(BaseModel):
     total_duration: int | None = Field(default=None, ge=0)
     eval_duration: int | None = Field(default=None, ge=0)
     eval_count: int | None = Field(default=None, ge=0)
+    prompt_eval_count: int | None = Field(default=None, ge=0)
 
 
 class LLMError(RuntimeError):
@@ -79,6 +80,7 @@ class OllamaClient:
             "total_duration_ns": payload.total_duration,
             "eval_duration_ns": payload.eval_duration,
             "eval_count": payload.eval_count,
+            "prompt_eval_count": payload.prompt_eval_count,
         }
         return payload.response
 
@@ -93,6 +95,7 @@ class OllamaClient:
                 "system": system_prompt,
                 "prompt": user_prompt,
                 "stream": False,
+                "options": {"num_ctx": self.settings.context_tokens},
                 **({"think": self.settings.thinking} if self.settings.thinking is not None else {}),
             }
             response = self._client.post(
@@ -136,6 +139,7 @@ class OllamaClient:
                     ),
                     "prompt": prompt,
                     "stream": False,
+                    "options": {"num_ctx": self.settings.context_tokens},
                     **(
                         {"think": self.settings.thinking}
                         if self.settings.thinking is not None
@@ -181,6 +185,7 @@ class OllamaClient:
             {
                 "stage": stage,
                 "model": self.settings.model,
+                "context_tokens": self.settings.context_tokens,
                 "prompt_type": prompt_type,
                 "input_character_count": len(prompt),
                 "elapsed_ms": round((time.monotonic() - started) * 1000),

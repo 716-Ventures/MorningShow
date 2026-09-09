@@ -94,6 +94,7 @@ def test_thinking_option_and_server_timing_metadata(tmp_path):
             )
             client.generate_text("system", "user", stage="test", prompt_type="test")
         assert json.loads(route.calls[0].request.content)["think"] is False
+        assert json.loads(route.calls[0].request.content)["options"]["num_ctx"] == 8192
         metrics = json.loads((tmp_path / "logs/model-calls.jsonl").read_text())
         assert metrics["load_duration_ns"] == 100
         assert metrics["eval_count"] == 2

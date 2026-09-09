@@ -30,6 +30,7 @@ class LLMSettings(Configuration):
     model: str
     timeout_seconds: int = Field(gt=0)
     thinking: bool | None = None
+    context_tokens: int = Field(default=8192, ge=4096, le=32768)
 
 
 class NewsSettings(Configuration):

@@ -90,12 +90,14 @@ class BoundedFailingScoringLLM:
 
     def __init__(self) -> None:
         self.payload: dict = {}
+        self.payloads: list[dict] = []
 
     def generate_text(self, *args, **kwargs) -> str:
         return ""
 
     def generate_structured(self, *args, **kwargs):
         self.payload = json.loads(args[1])
+        self.payloads.append(self.payload)
         raise LLMError("bounded scoring fixture failure")
 
 
@@ -398,7 +400,26 @@ def test_large_candidate_set_sends_bounded_scoring_prompt(tmp_path: Path) -> Non
     )
 
     assert len(scores) == 80
-    assert len(llm.payload["clusters"]) == 18
+    assert len(llm.payloads) == 3
+    assert sum(len(payload["clusters"]) for payload in llm.payloads) == 18
+    assert all(len(payload["clusters"]) <= 6 for payload in llm.payloads)
     assert len(json.dumps(llm.payload)) < 60_000
     diagnostic = (tmp_path / "logs" / "scoring-fallback.json").read_text(encoding="utf-8")
     assert "bounded scoring fixture failure" in diagnostic
+
+
+def test_empty_model_evidence_cannot_erase_grounded_local_scores(tmp_path):
+    class EmptyEvidence(CapturingScoringLLM):
+        def generate_structured(self, *args, **kwargs):
+            response = super().generate_structured(*args, **kwargs)
+            for item in response.scores:
+                item.relevance = item.importance = item.confidence = item.final_score = 0
+                item.reason = "No content provided."
+            return response
+
+    scores = score_stories(
+        [cluster()], profile(), tmp_path, EmptyEvidence(), extractions=[extraction()]
+    )
+    assert scores[0].relevance >= 60
+    assert scores[0].final_score > 0
+    assert "no scoring evidence" in (tmp_path / "logs/scoring-fallback.json").read_text()

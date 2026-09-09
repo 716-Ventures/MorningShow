@@ -9,7 +9,12 @@ from pydantic import ValidationError
 
 from morning_radio import db
 from morning_radio.artifacts.io import atomic_write_json
-from morning_radio.llm.client import LLMClient, LLMError, allows_fixture_fallback
+from morning_radio.llm.client import (
+    LLMClient,
+    LLMError,
+    LLMInvalidResponseError,
+    allows_fixture_fallback,
+)
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import StoryScoresResponse
 from morning_radio.models import (
@@ -24,6 +29,7 @@ from morning_radio.models import (
 
 MAX_LLM_SCORING_PROMPT_CHARS = 60_000
 MAX_LLM_SCORING_CLUSTERS = 18
+SCORING_BATCH_SIZE = 6
 
 
 def score_stories(
@@ -55,46 +61,39 @@ def score_stories(
             key=lambda cluster: heuristic_by_id[cluster.cluster_id].final_score,
             reverse=True,
         )[:MAX_LLM_SCORING_CLUSTERS]
-        llm_cluster_ids = {cluster.cluster_id for cluster in llm_clusters}
-        scoring_prompt = json.dumps(
-            {
-                "profile": profile.model_dump(mode="json"),
-                "editorial_memory": editorial_memory,
-                "clusters": [compact_cluster(item) for item in llm_clusters],
-                "extraction_evidence": {
-                    cluster_id: extraction_payload.get(cluster_id, [])
-                    for cluster_id in llm_cluster_ids
-                },
-                "story_history": {
-                    cluster.fingerprint: history[cluster.fingerprint]
-                    for cluster in llm_clusters
-                    if cluster.fingerprint in history
-                },
-                "required_cluster_ids": [item.cluster_id for item in llm_clusters],
-            },
-            ensure_ascii=False,
-        )
-        if len(scoring_prompt) > MAX_LLM_SCORING_PROMPT_CHARS:
-            atomic_write_json(
-                run_dir / "logs" / "scoring-fallback.json",
+        for start in range(0, len(llm_clusters), SCORING_BATCH_SIZE):
+            batch = llm_clusters[start : start + SCORING_BATCH_SIZE]
+            scoring_prompt = json.dumps(
                 {
-                    "model": llm.model,
-                    "reason": (
-                        f"Scoring prompt exceeded {MAX_LLM_SCORING_PROMPT_CHARS} characters."
-                    ),
-                    "input_character_count": len(scoring_prompt),
-                    "fixture_fallback": allows_fixture_fallback(llm),
+                    "profile": profile.model_dump(mode="json"),
+                    "editorial_memory": editorial_memory,
+                    "clusters": [compact_cluster(item) for item in batch],
+                    "extraction_evidence": {
+                        item.cluster_id: extraction_payload.get(item.cluster_id, [])
+                        for item in batch
+                    },
+                    "story_history": {
+                        item.fingerprint: history[item.fingerprint]
+                        for item in batch
+                        if item.fingerprint in history
+                    },
+                    "required_cluster_ids": [item.cluster_id for item in batch],
                 },
+                ensure_ascii=False,
             )
-        else:
-            return _score_with_llm(
-                scoring_prompt,
-                llm_clusters,
-                profile,
-                history,
-                run_dir,
-                llm,
-                heuristic_scores,
+            if len(scoring_prompt) > MAX_LLM_SCORING_PROMPT_CHARS:
+                atomic_write_json(
+                    run_dir / "logs/scoring-fallback.json",
+                    {
+                        "model": llm.model,
+                        "reason": "Scoring prompt exceeded configured character guardrail.",
+                        "input_character_count": len(scoring_prompt),
+                        "fixture_fallback": allows_fixture_fallback(llm),
+                    },
+                )
+                continue
+            heuristic_scores = _score_with_llm(
+                scoring_prompt, batch, profile, history, run_dir, llm, heuristic_scores
             )
     return _persist_scores(heuristic_scores, run_dir)
 
@@ -118,7 +117,18 @@ def _score_with_llm(
         )
         expected = {item.cluster_id for item in requested_clusters}
         received = {item.cluster_id for item in response.scores}
-        if expected <= received:
+        if received != expected or len(response.scores) != len(expected):
+            raise LLMInvalidResponseError(
+                "Scoring must return each requested cluster exactly once."
+            )
+        if all(
+            score.confidence == 0 and score.relevance == 0 and score.importance == 0
+            for score in response.scores
+        ):
+            raise LLMInvalidResponseError(
+                "Model reported no scoring evidence; retaining grounded local scores."
+            )
+        if expected == received:
             heuristic_by_id = {score.cluster_id: score for score in fallback_scores}
             normalized_scores = [
                 preserve_deterministic_matches(score, heuristic_by_id[score.cluster_id])
@@ -313,6 +323,9 @@ def preserve_deterministic_matches(
     return model_score.model_copy(
         update={
             "matched_interests": heuristic_score.matched_interests,
+            "relevance": max(model_score.relevance, heuristic_score.relevance)
+            if heuristic_score.matched_interests
+            else model_score.relevance,
             "negative_matches": negative_matches,
         }
     )

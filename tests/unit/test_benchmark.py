@@ -97,3 +97,50 @@ def test_live_mode_rejects_fake_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("MORNING_RADIO_FAKE_TTS", "1")
     with pytest.raises(ValueError, match="Unset"):
         benchmark.run_benchmark(tmp_path, live=True)
+
+
+@pytest.mark.parametrize("fails", [True, False])
+def test_episode_worker_isolates_history_and_retains_diagnostics(monkeypatch, tmp_path, fails):
+    import os
+
+    from morning_radio.artifacts.io import atomic_write_json
+    from morning_radio.models import RunMorningResult
+    from morning_radio.profile.compiler import load_profile
+
+    for key in (
+        "MORNING_RADIO_FIXTURE_RUN",
+        "MORNING_RADIO_FIXTURE_DIR",
+        "MORNING_RADIO_FAKE_LLM",
+        "MORNING_RADIO_FAKE_TTS",
+        "MORNING_RADIO_FAKE_VERIFICATION_FAIL",
+    ):
+        monkeypatch.setenv(key, "old")
+
+    def run(*args, **kwargs):
+        root = kwargs["root"]
+        assert root.is_relative_to(tmp_path)
+        assert len(load_profile(root).interests) == 3
+        assert os.environ["MORNING_RADIO_FIXTURE_RUN"] == "1"
+        assert "MORNING_RADIO_FAKE_LLM" not in os.environ
+        if fails:
+            raise RuntimeError("live failure")
+        atomic_write_json(root / "runs/test/performance.json", {"stages": []})
+        return RunMorningResult(
+            run_id="test",
+            target_minutes=10,
+            stories=3,
+            script="runs/test/script-final.md",
+            episode="runs/test/episode.mp3",
+            sources="runs/test/sources.html",
+        )
+
+    monkeypatch.setattr(benchmark, "run_morning", run)
+    path = tmp_path / "episode.json"
+    if fails:
+        with pytest.raises(RuntimeError, match="live failure"):
+            benchmark.episode_worker(path)
+    else:
+        benchmark.episode_worker(path)
+    report = json.loads(path.read_text())
+    assert Path(report["workspace"]).exists()
+    assert ("error" in report) == fails

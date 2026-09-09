@@ -27,6 +27,7 @@ from morning_radio.audio.production import resolve_voices
 from morning_radio.audio.tts import build_tts_adapter, prepare_tts_text
 from morning_radio.evaluation import evaluate_live, load_corpus
 from morning_radio.llm.client import OllamaClient
+from morning_radio.models import Interest
 from morning_radio.performance import peak_memory
 from morning_radio.pipeline import run_morning
 from morning_radio.profile.compiler import default_profile, save_profile
@@ -62,6 +63,59 @@ def fixture_worker(output: Path) -> None:
                 **peak_memory(),
             },
         )
+
+
+def episode_worker(output: Path) -> None:
+    """Full real-adapter pipeline on frozen source fixtures, with retained evidence."""
+    root = output.parent / f"{output.stem}-workspace"
+    root.mkdir(parents=True, exist_ok=False)
+    shutil.copytree(repo_root() / "config", root / "config")
+    profile = default_profile()
+    profile.interests = [
+        Interest(name=name, priority=5, depth="normal") for name in load_corpus().interests
+    ]
+    save_profile(profile, root)
+    settings = load_app_settings(root)
+    settings.selection.maximum_selected_stories = 3
+    atomic_write_text(root / "config/app.yaml", json.dumps(settings.model_dump(mode="json")))
+    production = load_production_settings(root)
+    production.generate_audio = True
+    atomic_write_text(
+        root / "config/production.yaml", json.dumps(production.model_dump(mode="json"))
+    )
+    os.environ["MORNING_RADIO_FIXTURE_RUN"] = "1"
+    os.environ["MORNING_RADIO_FIXTURE_DIR"] = str(repo_root() / "tests/fixtures/editorial-episode")
+    for key in (
+        "MORNING_RADIO_FAKE_LLM",
+        "MORNING_RADIO_FAKE_TTS",
+        "MORNING_RADIO_FAKE_VERIFICATION_FAIL",
+    ):
+        os.environ.pop(key, None)
+    started = time.monotonic()
+    try:
+        result = run_morning(date(2026, 9, 9), minutes=5, no_assets=True, root=root)
+    except Exception as exc:
+        atomic_write_json(
+            output,
+            {
+                "error": str(exc),
+                "workspace": str(root),
+                "elapsed_ms": (time.monotonic() - started) * 1000,
+                **peak_memory(),
+            },
+        )
+        raise
+    run_dir = root / Path(result.script).parent
+    atomic_write_json(
+        output,
+        {
+            "elapsed_ms": (time.monotonic() - started) * 1000,
+            "workspace": str(root),
+            "result": result.model_dump(mode="json"),
+            "performance": json.loads((run_dir / "performance.json").read_text()),
+            **peak_memory(),
+        },
+    )
 
 
 def run_benchmark(
@@ -160,9 +214,18 @@ def main() -> None:
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--thinking", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--worker", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--episode",
+        action="store_true",
+        help="One full real-Qwen/TTS pipeline run on fixed source fixtures; retains its isolated workspace.",
+    )
     args = parser.parse_args()
     if args.worker:
         fixture_worker(args.worker)
+    elif args.episode:
+        args.output.mkdir(parents=True, exist_ok=True)
+        episode_worker(args.output / "episode.json")
+        print(args.output / "episode.json")
     else:
         print(run_benchmark(args.output, args.repeats, live=args.live, thinking=args.thinking))
 
