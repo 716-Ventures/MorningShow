@@ -13,12 +13,14 @@ This is a Python CLI, not a web service. Keep domain logic separate from orchest
 | `artifacts/io.py`, `logging.py` | Atomic artifact writes and run diagnostics. Do not leave partially written final files or open log handles. |
 | `artifacts/sources.py` | Escaped source HTML ordered by the final spoken story bodies. Only HTTP(S) URLs become clickable links. |
 | `profile/compiler.py`, `interview.py`, `feedback.py` | Profile persistence, shared setup/edit collectors, and feedback memory. Cancel must not save; accepting defaults must preserve existing choices. |
-| `llm/client.py`, `schemas.py`, `prompts.py` | Pooled Ollama HTTP access, bounded retries, response validation, and prompts. An application-owned `OllamaClient` must be closed; injected clients remain the caller's responsibility. |
-| `newsroom/feeds.py`, `fetch.py`, `extract.py` | Discovery, extraction queues, checked article redirects, bounded decoded downloads, and usable-text decisions. Article DNS checks and parsing run off the async event loop. |
+| `llm/client.py`, `schemas.py`, `prompts.py` | Pooled Ollama HTTP access, bounded retries, typed response/timing envelopes, and prompts. An application-owned `OllamaClient` must be closed; injected clients remain the caller's responsibility. |
+| `newsroom/feeds.py`, `fetch.py`, `download.py`, `transport.py`, `extract.py` | Discovery, connection-time public-IP pinning, checked redirects, bounded encoded/decoded streaming, extraction queues, and usable-text decisions. DNS checks and parsing run off the async event loop. |
 | `newsroom/cluster.py`, `score.py`, `select.py` | Event grouping, profile-aware scoring, duration/coverage selection, and history-aware decisions. Tests should assert actual selected identities, not only counts. |
 | `newsroom/dossier.py` | Source-supported story research, backfill, and duplicate filtering. Model cluster identity and citations must belong to the supplied context; restored aliases are revalidated. |
 | `showgen/rundown.py`, `script.py`, `verify.py` | Rundown planning, spoken copy and production cues, and publication verification. Verifier errors fail closed. A standalone headline can be stripped; a sentence sharing its subject must be retained. |
 | `audio/tts.py`, `production.py`, `master.py` | TTS adapters/text preparation, typed production events, synthesis, asset resolution, and FFmpeg export. Fixtures use tones, never pretend to validate pronunciation. |
+| `evaluation.py`, `evaluation-cases.json` | Versioned synthetic expectations for interest coverage, event identity, and source support. Live evaluation includes the real publication gate; provenance explicitly excludes independent human grading. |
+| `performance.py`, `benchmark.py` | Monotonic per-stage metrics, memory high-water marks, isolated fixture/full-episode runs, and first-use/repeat local inference measurements. |
 
 ## Configuration and Data
 
@@ -36,11 +38,33 @@ Treat profile files, article bodies, and model outputs as data. Never execute in
 
 Asset directories are `assets/opening`, `assets/closing`, `assets/bumpers`, and `assets/beds`. Named directives resolve a literal file stem, not a glob pattern. Supported suffixes are WAV, MP3, M4A, AIFF, and AAC. Symlinks may not escape their configured directory.
 
-Opening/closing and bumpers are standalone clips. The current bed renderer mixes a looping bed under each speech chunk, at a fixed factor of 0.18 after normalization. It does not provide continuous bed playback across chunks and explicit pauses; see the review follow-ups before changing this behavior.
+Opening/closing and bumpers are standalone clips. Each explicit bed region is concatenated before one looping-bed overlay at a factor of 0.18 after normalization. Its cursor continues through speech chunks and pauses until `[BED: STOP]`. A second region starts a new cursor. Speech and pauses retain their original timeline lengths; the dry program is not gain-normalized again when the bed is overlaid. Cues inside a bed region are part of that region, so place BED STOP before a cue when the bed must not accompany it.
 
 The opening transition trims trailing opening silence and leading silence on the next speech clip. Other speech boundaries and explicit pauses are retained. Each unique input is measured once per render; measurements are not cached across runs. Constant gain is capped at +12 dB and peak limited. Optional assets below -40 LUFS or with non-finite measurements are skipped with diagnostics; required ones fail. These thresholds do not repair a noisy recording.
 
 Final MP3 duration checks include standalone music/bumper duration in addition to the supplied speech/pause budget. Beds do not add timeline duration. FFmpeg commands time out after 600 seconds per command; FFprobe after 30 seconds. Check `mix/*-stderr.txt` before retrying a failure.
+
+## Network and External Data
+
+Live discovery and extraction both use `PublicAsyncTransport`. Its connection pool retains the original host for TLS certificate verification, SNI, Host headers, and origin isolation, but the network backend connects to validated numeric public addresses only. It rejects mixed private/public DNS answers and does not use environment proxies. Redirects receive the same policy as initial requests. The implementation uses HTTPCore's [public custom-network-backend interface](https://www.encode.io/httpcore/network-backends/), not global DNS monkeypatches.
+
+Downloads advertise only gzip/deflate, bound raw bytes and incremental decompression, reject malformed/trailing compressed data, and close on failure. Async downloads have a total deadline covering redirects and body transfer in addition to socket timeouts. Injected clients in low-level synchronous helpers are caller-owned; production network access goes through the pinned async transport. Do not replace it with a default HTTPX client when extending discovery/extraction.
+
+Configuration rejects unknown keys/engines and invalid output formats. External Ollama JSON is validated before accessing its fields. Five boundary modules use strict Pyright without disabling unknown-type diagnostics. Most remaining modules retain the established basic-mode baseline.
+
+The local client supplies `options.num_ctx` explicitly (default 8192), using Ollama's [documented context control](https://docs.ollama.com/faq). Scoring splits its capped 18-story candidate set into batches of at most six; each response must contain exactly those identities once. A batch that reports zero confidence, relevance, and importance for every item is treated as unavailable model evidence, retaining the grounded local scores. Topic relevance cannot be erased by model reranking, while negative preferences and the later factual verification gate remain enforced.
+
+An explicit minutes override takes precedence over the profile's usual variable-duration range. Short episodes allocate smaller topic-coverage slots instead of reserving 75 seconds per topic and inadvertently excluding the third interest.
+
+Grounded script fallback uses the same per-story word limit as validation. It reserves uncertainty notes and retains complete sentences from the start of the story. It must fail if the lead and required cautions cannot fit; never truncate a claim midway or remove a caveat to meet runtime.
+
+## Measurement and Evaluation
+
+`performance.json` accompanies successful and failed stages. Elapsed times use a monotonic clock; RSS values are lifetime high-water marks for the Python process and its subprocesses, not a sum of simultaneously resident memory. Live benchmark reports also capture Ollama's loaded-model sizes. The model-call log records Ollama's [loading and generation timing fields](https://docs.ollama.com/api/usage) in nanoseconds separately from request wall time.
+
+Benchmark reports include configuration plus corpus and implementation hashes. Use the same inputs, versions, model, voice, and machine when comparing results. First-use/repeat labels do not imply a forced cold load; no running model is unloaded. `llm.thinking` is optional and maps to Ollama's [thinking control](https://docs.ollama.com/capabilities/thinking); absence preserves model behavior.
+
+Do not describe a recorded judge used by offline tests as a live quality result. The opt-in live evaluator calls the configured model and the production verifier. Its synthetic expected labels are explicit, but human review/listening is still required for subjective quality acceptance.
 
 ## Test-First Maintenance
 

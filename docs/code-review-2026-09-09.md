@@ -1,5 +1,7 @@
 # Project Code Review - 2026-09-09
 
+**Follow-up:** The engineering work listed below has now been implemented. See [Follow-up Results](review-followup-2026-09-09.md) for the current tests, live evaluation, performance measurements, and commits. The original review and follow-up directions are retained as an audit trail, not a current backlog.
+
 ## Scope and Verdict
 
 Reviewed the CLI, configuration/domain schemas, persistence and artifacts, profile setup and feedback, LLM integration, every newsroom stage, script/rundown/verification, TTS preparation and mixing, tests, packaging, CI, and operator documentation. Concrete findings were fixed in focused commits with regression coverage. Existing operator edits to `config/app.yaml`, `data/profile.json`, and `data/profile.md` were intentionally left untouched.
@@ -47,7 +49,7 @@ Executed locally on macOS with Python 3.12.14 and real FFmpeg/FFprobe:
 
 The FFmpeg checks use deterministic tones, not human speech. They catch signal-processing regressions but do not certify pronunciation, natural pacing, musical quality, or the user's actual recordings. No new live Ollama/Kokoro episode or full latency benchmark was run as part of this review. Hosted GitHub CI completion is not implied by local success. The wheel test may need network access to populate its build-backend cache on a fresh machine.
 
-## Remaining Work and Limits
+## Original Follow-Up Directions
 
 ### P2: Bed Continuity
 

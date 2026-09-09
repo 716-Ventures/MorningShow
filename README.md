@@ -75,6 +75,27 @@ uv run pyright
 uv run pytest --cov=morning_radio --cov-branch --cov-report=term-missing -q
 ```
 
-The suite includes isolated script-only and MP3 fixture runs, a wheel-build check, and real FFmpeg signal tests. It does not need a running Ollama instance or download TTS weights. Type checking currently uses Pyright's basic mode; CI enforces the committed lockfile, formatting, lint, type checks, and at least 70% branch-aware combined coverage.
+The suite includes isolated script-only and MP3 fixture runs, a wheel-build check, real FFmpeg signal/bed-continuity tests, and a versioned editorial evaluation corpus. It does not need a running Ollama instance or download TTS weights. Pyright checks the whole project, with strict mode on configuration, LLM responses, URL validation, downloads, and network transport. CI enforces the lockfile, formatting, lint, type checks, and at least 85% branch-aware combined coverage.
 
-See [Maintainer Guide](docs/maintainer-guide.md) for module responsibilities, configuration, failure handling, and testing conventions. See [Code Review](docs/code-review-2026-09-09.md) for findings, measured verification, and remaining limitations.
+Every episode writes `performance.json` with monotonic stage durations and process/subprocess memory high-water marks. Model-call logs separate Ollama loading from token-generation time. These measurements do not include the external Ollama process in Python's RSS.
+
+Reproducible performance and editorial checks:
+
+```bash
+# Three isolated full-pipeline fixture runs, without real inference.
+uv run python -m morning_radio.benchmark --repeats 3
+
+# Live Qwen/Bella evaluation and first-use/repeat inference measurements.
+uv run python -m morning_radio.benchmark --live --repeats 2
+
+# A full real-model/voice episode using fixed synthetic source material.
+uv run python -m morning_radio.benchmark --episode
+```
+
+Benchmarks write to unique directories under `runs/benchmarks/` and never update your normal profile or story history. The episode benchmark retains its isolated workspace and diagnostics. `--live` supports `--thinking` and `--no-thinking` for controlled comparisons; normal episodes retain the model's default unless `llm.thinking` is explicitly set in `config/app.yaml`. First-use does not mean a guaranteed cold model load: the benchmark never unloads an already-running model.
+
+LLM requests explicitly use an 8,192-token context by default (`llm.context_tokens`), and scoring considers at most six stories per request. This avoids relying on a smaller server default for multi-story prompts. Larger contexts use more memory; keep this setting conservative on a 16 GB machine.
+
+The corpus contains synthetic, source-checkable expected outcomes, not independently human-graded listening evaluations. It tests multiple-interest selection, missing-topic days, duplicated/paraphrased events, shared entities, unsupported claims, source prompt injection, and the actual publication verifier.
+
+See [Maintainer Guide](docs/maintainer-guide.md) for module responsibilities, configuration, failure handling, and testing conventions. See [Code Review](docs/code-review-2026-09-09.md) for the original findings and [Follow-up Results](docs/review-followup-2026-09-09.md) for fixes, measured verification, and remaining limitations.
