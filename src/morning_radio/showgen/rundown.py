@@ -164,7 +164,10 @@ def validate_rundown(
 
 
 def duration_bounds(profile: EditorialProfile, target_seconds: int) -> tuple[int, int]:
-    if profile.show_format.allow_variable_length:
+    if (
+        profile.show_format.allow_variable_length
+        and target_seconds == profile.show_format.target_minutes * 60
+    ):
         return profile.show_format.minimum_minutes * 60, profile.show_format.maximum_minutes * 60
     return round(target_seconds * 0.8), round(target_seconds * 1.2)
 

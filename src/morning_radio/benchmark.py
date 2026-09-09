@@ -94,6 +94,8 @@ def episode_worker(output: Path) -> None:
     started = time.monotonic()
     try:
         result = run_morning(date(2026, 9, 9), minutes=5, no_assets=True, root=root)
+        if result.stories != len(load_corpus().interests):
+            raise RuntimeError("Acceptance episode must cover all three supplied interest stories.")
     except Exception as exc:
         atomic_write_json(
             output,

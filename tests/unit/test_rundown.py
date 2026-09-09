@@ -19,7 +19,7 @@ from morning_radio.models import (
     StoryDossier,
     VoicePreferences,
 )
-from morning_radio.showgen.rundown import build_rundown, validate_rundown
+from morning_radio.showgen.rundown import build_rundown, duration_bounds, validate_rundown
 
 
 class CorrectingRundownLLM:
@@ -144,6 +144,16 @@ def segment(
         planned_seconds=seconds,
         purpose="test",
     )
+
+
+def test_explicit_minutes_override_profile_duration_bounds(tmp_path):
+    from morning_radio.profile.compiler import default_profile
+
+    configured = default_profile()
+    assert duration_bounds(configured, 300) == (240, 360)
+    dossiers = [dossier(f"cluster-{index}") for index in range(3)]
+    planned = build_rundown(date(2026, 9, 9), 5, configured, dossiers, tmp_path)
+    assert validate_rundown(planned, configured, dossiers, 300) == []
 
 
 def test_validate_rundown_reports_unknown_duplicate_and_sum_errors() -> None:

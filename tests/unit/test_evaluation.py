@@ -25,6 +25,35 @@ def test_frozen_deterministic_event_pairs(case):
     assert actual == case.same_event
 
 
+def test_short_episode_keeps_all_three_available_interests(tmp_path):
+    from morning_radio.models import Interest, StoryScore
+    from morning_radio.newsroom.select import select_stories
+    from morning_radio.profile.compiler import default_profile
+    from morning_radio.settings import load_app_settings
+
+    profile = default_profile()
+    names = load_corpus().interests
+    profile.interests = [Interest(name=name, priority=5, depth="normal") for name in names]
+    scores = [
+        StoryScore(
+            cluster_id=str(index),
+            matched_interests=[name],
+            relevance=80,
+            final_score=80,
+            importance=50,
+            freshness=80,
+            locality=20,
+            novelty=80,
+            confidence=90,
+            reason="test",
+        )
+        for index, name in enumerate(names)
+    ]
+    selected = select_stories(scores, profile, load_app_settings(), tmp_path, target_minutes=5)
+    assert [item.cluster_id for item in selected.selected] == ["0", "1", "2"]
+    assert selected.uncovered_interests == []
+
+
 def test_full_evaluation_exercises_actual_verification_gate(tmp_path):
     corpus = load_corpus()
 

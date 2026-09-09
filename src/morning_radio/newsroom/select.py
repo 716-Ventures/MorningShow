@@ -41,7 +41,7 @@ def select_stories(
         key=lambda item: (-item[1].priority, item[0]),
     )
     coverage_slots = min(len(ordered_interests), settings.selection.maximum_selected_stories)
-    coverage_seconds_cap = max(75, budget // max(1, coverage_slots))
+    coverage_seconds_cap = max(30, budget // max(1, coverage_slots))
 
     for _, interest in ordered_interests:
         if len(selected) >= settings.selection.maximum_selected_stories:
