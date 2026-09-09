@@ -232,3 +232,31 @@ def test_unstructured_error_uses_safe_default(settings, tmp_path, body):
         pytest.raises(TTSError, match="Check ELEVENLABS_API_KEY"),
     ):
         ElevenLabsTTS(settings, client=client).synthesize("Hello.", VOICE, tmp_path / "sample.wav")
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        (
+            "Free users cannot use library voices via the API. Please upgrade your subscription. test-secret-never-log",
+            "requires a paid plan",
+        ),
+        ("Insufficient credits. test-secret-never-log", "Check your ElevenLabs credits"),
+        (None, "Check your ElevenLabs credits"),
+    ],
+)
+def test_payment_error_distinguishes_voice_library_plan_restriction(
+    settings, tmp_path, message, expected
+):
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                402, json={"detail": {"status": "payment_required", "message": message}}
+            )
+        )
+    ) as client:
+        with pytest.raises(TTSError, match=expected) as error:
+            ElevenLabsTTS(settings, client=client).synthesize(
+                "Hello.", VOICE, tmp_path / "sample.wav"
+            )
+        assert "test-secret" not in str(error.value)

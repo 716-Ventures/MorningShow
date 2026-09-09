@@ -180,6 +180,14 @@ def _check_status(response: httpx.Response) -> None:
                     guidance = "This key lacks a required permission. Enable Voices Read and Text to Speech in its ElevenLabs API key settings."
             elif code == "quota_exceeded":
                 guidance = "Your ElevenLabs quota is exhausted. Check credits and the key's character limit."
+            elif code == "payment_required":
+                message = detail.get("message", "")
+                if (
+                    isinstance(message, str)
+                    and "library voice" in message.lower()
+                    and "free" in message.lower()
+                ):
+                    guidance = "ElevenLabs requires a paid plan to use Voice Library voices through the API. Activate a paid plan on the account/workspace associated with this key, or choose a voice available to your current plan."
     except (ValueError, httpx.HTTPError):
         pass
     # Never echo remote bodies or HTTP exception reprs; they may contain supplied secrets.
