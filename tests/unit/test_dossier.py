@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -319,3 +321,81 @@ def test_dossier_deduplication_catches_same_event_with_different_headlines() -> 
     )
 
     assert _find_duplicate_dossier(second, [first]) == first
+
+
+@pytest.mark.parametrize("mode", ["valid", "unsafe", "duplicate", "thin"])
+def test_model_dossier_acceptance_rejection_and_backfill(tmp_path, mode):
+    ids = ["cluster-001", "cluster-002", "cluster-003"]
+    clusters = [
+        Cluster(
+            cluster_id=id_,
+            canonical_title=id_,
+            candidate_ids=[f"candidate-{i}"],
+            source_count=1,
+            fingerprint=id_,
+        )
+        for i, id_ in enumerate(ids)
+    ]
+    extractions = [
+        ExtractionResult(
+            candidate_id=f"candidate-{i}",
+            url=f"https://example.com/{i}",
+            title=id_,
+            text="Astronomers discovered an unusual planetary orbit. Follow-up observations will begin this autumn.",
+            word_count=13,
+            extraction_status="usable",
+        )
+        for i, id_ in enumerate(ids)
+    ]
+    selected = [
+        SelectedStory(cluster_id=id_, reason="test", estimated_seconds=60, score=90) for id_ in ids
+    ]
+
+    class Model:
+        model = "test"
+
+        def generate_text(self, *args, **kwargs):
+            return ""
+
+        def generate_structured(self, *args, **kwargs):
+            cluster = json.loads(args[1])["cluster"]["cluster_id"]
+            word = "telescope" if cluster == ids[0] or mode == "duplicate" else "football"
+            payload = _dossier_payload(
+                cluster_id=cluster,
+                what_happened=" ".join([word] * 25),
+                facts=[
+                    {"claim": " ".join([word] * 14), "supporting_candidate_ids": ["source-1"]}
+                    for _ in range(3)
+                ],
+                source_ids=["source-1"],
+                safe_for_scripting=not (mode == "unsafe" and cluster == ids[0]),
+            )
+            if mode == "thin":
+                payload["facts"] = [
+                    {"claim": "One fact.", "supporting_candidate_ids": ["source-1"]}
+                ]
+            if mode == "duplicate":
+                payload["what_happened"] = (
+                    "Researchers found OpenAI agents posting on a German wiki for weeks exchanging information and trying to evade a moderator during the experiment."
+                )
+            return args[2].model_validate({"dossier": payload})
+
+    dossiers = build_dossiers(selected, clusters, extractions, tmp_path, Model())
+    history = json.loads((tmp_path / "dossiers/backfill-history.json").read_text())
+    if mode == "unsafe":
+        assert history["rejections"][0]["reason"] == "llm_marked_unsafe"
+        assert dossiers[0].cluster_id == ids[1]
+    elif mode == "duplicate":
+        assert len(dossiers) == 1
+        assert history["rejections"][0]["reason"] == "duplicate_of:cluster-001"
+    elif mode == "thin":
+        assert (tmp_path / "dossiers/cluster-001-fallback.json").exists()
+        assert dossiers[0].facts[0].claim.startswith("Astronomers")
+    else:
+        assert len(dossiers) == 3
+        assert dossiers[0].source_ids == ["candidate-0"]
+
+
+def test_dossier_without_any_source_support_fails(tmp_path):
+    with pytest.raises(RuntimeError, match="enough source support"):
+        build_dossiers([], [], [], tmp_path)

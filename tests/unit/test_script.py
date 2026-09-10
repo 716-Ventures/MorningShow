@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 
 import pytest
@@ -18,6 +19,7 @@ from morning_radio.models import (
     StoryDossier,
     VoicePreferences,
 )
+from morning_radio.showgen import script as script_module
 from morning_radio.showgen.script import (
     ScriptError,
     estimate_spoken_seconds,
@@ -223,6 +225,74 @@ def test_recoverable_script_model_error_uses_fallback(tmp_path) -> None:
     diagnostic = (tmp_path / "logs" / "script-fallback.json").read_text(encoding="utf-8")
     assert "small-local-model" in diagnostic
     assert "timed out" in diagnostic
+
+
+def test_model_script_is_adjusted_validated_and_persisted(tmp_path):
+    body = story_script_paragraph(dossier())
+    copy = f"[MUSIC: OPENING]\n[HOST]\nGood morning.\n[HOST]\n{body}\n[HOST]\nI'll keep an eye on how this develops.\n[HOST]\nThat's the show for now.\n[MUSIC: CLOSING]\n"
+
+    class Model:
+        model = "test"
+
+        def __init__(self):
+            self.calls = []
+
+        def generate_text(self, *args, **kwargs):
+            raise AssertionError("structured calls only")
+
+        def generate_structured(self, *args, **kwargs):
+            self.calls.append((json.loads(args[1]), kwargs["prompt_type"]))
+            return args[2](script=copy)
+
+    model = Model()
+    result = write_script(profile(), rundown(), [dossier()], tmp_path, model)
+    assert [kind for _, kind in model.calls] == ["script", "script_duration_adjustment"]
+    assert model.calls[1][0]["target_seconds"] == 180
+    assert body in result
+    assert (tmp_path / "script-draft.md").read_text() == result
+    assert not (tmp_path / "logs/script-fallback.json").exists()
+
+
+def test_duration_in_range_does_not_call_model():
+    text = "[HOST]\n" + "word " * 450
+    plan = rundown()
+    plan.planned_seconds = estimate_spoken_seconds(text)
+    assert script_module.adjust_script_duration_if_needed(text, plan, FailingScriptLLM()) == text
+
+
+@pytest.mark.parametrize(
+    ("items", "expected"),
+    [
+        ([], ""),
+        (["one", ""], "one"),
+        (["one", "two"], "one and two"),
+        (["one", "two", "three"], "one; two; and three"),
+    ],
+)
+def test_radio_list_joining(items, expected):
+    assert script_module.join_for_radio(items) == expected
+
+
+def test_story_opening_and_production_validation_reject_regressions():
+    with pytest.raises(ScriptError, match="headline-style"):
+        script_module.validate_story_openings("[HOST]\nFirst up: A story.", [dossier()])
+    with pytest.raises(ScriptError, match="reading its headline"):
+        script_module.validate_story_openings(
+            "[HOST]\nArtificial intelligence developer tools. Further details.", [dossier()]
+        )
+    with pytest.raises(ScriptError, match="Production directive"):
+        script_module.validate_production_directives("[HOST]\nNews.", profile(), [dossier()])
+    script_module.validate_production_directives("[HOST]\nNews.", profile(), [])
+    script_module.validate_script_quality("[HOST]\nNews.", rundown(), [])
+
+
+def test_quality_rejects_missing_topic_and_overlong_story():
+    with pytest.raises(ScriptError, match="covers only"):
+        validate_script_quality("[HOST]\n" + "zebra " * 90, rundown(), [dossier()])
+    with pytest.raises(ScriptError, match="too long"):
+        validate_script_quality(
+            "[HOST]\n" + story_script_paragraph(dossier()) * 15, rundown(), [dossier()]
+        )
 
 
 def test_fallback_fits_short_story_and_preserves_uncertainty(tmp_path) -> None:

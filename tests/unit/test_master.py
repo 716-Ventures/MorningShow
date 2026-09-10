@@ -21,6 +21,7 @@ from morning_radio.audio.master import (
     silence_trim_filter,
     validate_final_mp3,
 )
+from morning_radio.audio.production import BedStartItem, MusicItem, SpeechItem
 from morning_radio.settings import ProductionSettings
 
 
@@ -99,6 +100,97 @@ def episode_file(tmp_path: Path) -> Path:
     path = tmp_path / "episode.mp3"
     path.write_bytes(b"mp3")
     return path
+
+
+@pytest.mark.parametrize(
+    "probe_data",
+    [
+        {"streams": []},
+        {"streams": [{"codec_type": "audio", "codec_name": "aac"}]},
+        probe("nan"),
+        probe("inf"),
+        probe("90", channels=1),
+    ],
+)
+def test_final_mp3_rejects_invalid_stream_metadata(tmp_path, probe_data):
+    with pytest.raises(AudioMasterError):
+        validate_final_mp3(episode_file(tmp_path), probe_data, 90, production_settings())
+
+
+@pytest.mark.parametrize("exists", [True, False])
+def test_final_mp3_rejects_missing_or_empty_file(tmp_path, exists):
+    path = tmp_path / "empty.mp3"
+    if exists:
+        path.touch()
+    with pytest.raises(AudioMasterError, match="not created"):
+        validate_final_mp3(path, probe("90"))
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        SpeechItem(text="Hello", host="HOST"),
+        MusicItem(directive="[MUSIC: OPENING]", optional=True),
+        BedStartItem(directive="[BED: bed]", optional=True),
+    ],
+)
+def test_master_requires_audio_paths(tmp_path, monkeypatch, item):
+    monkeypatch.setattr(master_module.shutil, "which", lambda name: f"/fake/{name}")
+    with pytest.raises(AudioMasterError, match=r"no .*path"):
+        mix_and_master([item], production_settings(), tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["music", "bed"])
+@pytest.mark.parametrize("skipped", [False, True])
+def test_master_skips_optional_silent_and_missing_assets(tmp_path, monkeypatch, kind, skipped):
+    monkeypatch.setattr(master_module.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(master_module, "measure_loudness", lambda *args: -60)
+    cls = MusicItem if kind == "music" else BedStartItem
+    item = cls(
+        directive="[BED: bed]" if kind == "bed" else "[MUSIC: OPENING]",
+        path=tmp_path / "silent.wav",
+        skipped=skipped,
+        optional=True,
+    )
+    with pytest.raises(AudioMasterError, match="did not render any audio"):
+        mix_and_master([item], production_settings(), tmp_path)
+
+
+def test_master_missing_ffmpeg_is_actionable(tmp_path, monkeypatch):
+    monkeypatch.setattr(master_module.shutil, "which", lambda name: None)
+    with pytest.raises(AudioMasterError, match="FFmpeg and FFprobe"):
+        mix_and_master([], production_settings(), tmp_path)
+
+
+@pytest.mark.parametrize("is_probe", [False, True])
+def test_subprocess_start_failure_retains_diagnostics(tmp_path, monkeypatch, is_probe):
+    def fail(*args, **kwargs):
+        raise OSError("cannot execute binary")
+
+    monkeypatch.setattr(master_module.subprocess, "run", fail)
+    with pytest.raises(AudioMasterError, match="could not start"):
+        if is_probe:
+            run_probe("/missing/ffprobe", tmp_path / "audio.mp3", tmp_path)
+        else:
+            run_command(["/missing/ffmpeg"], tmp_path, "test")
+    name = "ffprobe" if is_probe else "test"
+    assert "cannot execute" in (tmp_path / "mix" / f"{name}-stderr.txt").read_text()
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "message"), [(1, "", "FFprobe failed"), (0, "[]", "unexpected JSON")]
+)
+def test_probe_rejects_failure_or_wrong_shape(tmp_path, monkeypatch, code, output, message):
+    monkeypatch.setattr(
+        master_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], code, stdout=output, stderr="probe diagnostic"
+        ),
+    )
+    with pytest.raises(AudioMasterError, match=message):
+        run_probe("/fake/ffprobe", tmp_path / "audio.mp3", tmp_path)
+    assert (tmp_path / "mix/ffprobe-stderr.txt").read_text() == "probe diagnostic"
 
 
 def test_unknown_production_plan_item_fails_before_rendering() -> None:

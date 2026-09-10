@@ -9,10 +9,12 @@ from morning_radio.audio.production import (
     PauseItem,
     ProductionPlanError,
     SpeechItem,
+    _asset_item,
     attach_audio_to_plan,
     build_production_plan,
     build_text_production_plan,
     resolve_asset,
+    split_tts_text,
 )
 from morning_radio.models import AudioMetadata
 from morning_radio.settings import ProductionSettings
@@ -27,6 +29,32 @@ def test_asset_symlink_cannot_escape_to_sibling_directory(tmp_path: Path) -> Non
     (root / "bed.wav").symlink_to(sibling / "secret.wav")
     with pytest.raises(ProductionPlanError, match="escapes"):
         resolve_asset(root, "bed")
+
+
+def test_empty_speech_and_extra_synthesized_audio(tmp_path):
+    assert split_tts_text("   ", 20) == []
+    metadata = AudioMetadata(
+        voice="tone", text_hash="test", duration_seconds=1, path=tmp_path / "speech.wav"
+    )
+    with pytest.raises(ProductionPlanError, match="count does not match"):
+        attach_audio_to_plan([], [metadata])
+
+
+@pytest.mark.parametrize("name", ["../secret", "a/b", "a\\b"])
+def test_invalid_asset_names_are_rejected(tmp_path, name):
+    with pytest.raises(ProductionPlanError, match="Invalid asset name"):
+        resolve_asset(tmp_path, name)
+
+
+def test_unknown_asset_type_rejected():
+    with pytest.raises(ProductionPlanError, match="Unknown production item"):
+        _asset_item("bad", "[BAD]", None, True, skipped=True)
+
+
+def test_unsupported_asset_extension_is_ignored(tmp_path):
+    (tmp_path / "bed.txt").write_text("not audio")
+    (tmp_path / "bed.wav").mkdir()
+    assert resolve_asset(tmp_path, "bed") is None
 
 
 def test_no_assets_removes_every_asset_event(tmp_path: Path) -> None:

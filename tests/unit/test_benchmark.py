@@ -99,6 +99,34 @@ def test_live_mode_rejects_fake_environment(monkeypatch, tmp_path):
         benchmark.run_benchmark(tmp_path, live=True)
 
 
+@pytest.mark.parametrize("mode", ["worker", "episode", "live"])
+def test_main_dispatches_arguments(monkeypatch, tmp_path, capsys, mode):
+    calls = []
+    monkeypatch.setattr(benchmark, "fixture_worker", lambda path: calls.append(("worker", path)))
+    monkeypatch.setattr(benchmark, "episode_worker", lambda path: calls.append(("episode", path)))
+
+    def run(output, repeats, **kwargs):
+        calls.append(("live", output, repeats, kwargs))
+        return output / "benchmark.json"
+
+    monkeypatch.setattr(benchmark, "run_benchmark", run)
+    arguments = ["benchmark", "--output", str(tmp_path)]
+    arguments += (
+        ["--worker", str(tmp_path / "worker.json")]
+        if mode == "worker"
+        else ["--episode"]
+        if mode == "episode"
+        else ["--live", "--no-thinking", "--repeats", "2"]
+    )
+    monkeypatch.setattr(benchmark.sys, "argv", arguments)
+    benchmark.main()
+    assert calls[0][0] == mode
+    if mode == "live":
+        assert calls[0][2:] == (2, {"live": True, "thinking": False})
+    if mode != "worker":
+        assert str(tmp_path) in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("fails", [True, False])
 def test_episode_worker_isolates_history_and_retains_diagnostics(monkeypatch, tmp_path, fails):
     import os

@@ -21,6 +21,7 @@ from morning_radio.newsroom.feeds import (
     fair_cap_candidates,
     fetch_enabled_feeds,
     parse_feed_candidates,
+    parse_feed_datetime,
 )
 from morning_radio.settings import (
     AppSettings,
@@ -187,3 +188,51 @@ def test_discover_candidates_treats_malformed_feed_as_failure(tmp_path: Path) ->
                 tmp_path,
                 requested_at=datetime(2026, 8, 15, tzinfo=UTC),
             )
+
+
+@pytest.mark.parametrize("value", [None, "not a date", (99999, 1, 1, 0, 0, 0), 123])
+def test_invalid_feed_dates_return_none(value):
+    assert parse_feed_datetime(value) is None
+
+
+@pytest.mark.parametrize("value", ["2026-08-15 12:00:00", (2026, 8, 15, 12, 0, 0)])
+def test_naive_feed_dates_are_utc(value):
+    assert parse_feed_datetime(value) == datetime(2026, 8, 15, 12, tzinfo=UTC)
+
+
+def test_feed_http_failure_is_recorded(tmp_path):
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://bad.example.com/rss").respond(503)
+        with pytest.raises(DiscoveryError, match="1 feed failures"):
+            discover_candidates(FeedSettings(feeds=[feed("bad")]), app_settings(), tmp_path)
+
+
+def test_feed_skips_incomplete_and_old_entries():
+    from types import SimpleNamespace
+
+    parsed = SimpleNamespace(
+        feed=SimpleNamespace(),
+        entries=[
+            SimpleNamespace(title="No link"),
+            SimpleNamespace(link="https://example.com/empty", title=" "),
+            SimpleNamespace(link="https://example.com/old", title="Old", published="2020-01-01"),
+            SimpleNamespace(link="https://example.com/new", title="Current"),
+        ],
+    )
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    result = parse_feed_candidates(feed("first"), parsed, now, now)
+    assert [item.title for item in result] == ["Current"]
+    assert result[0].publisher == "first"
+
+
+def test_fair_cap_skips_duplicate_urls():
+    first, second = feed("first"), feed("second")
+    result = fair_cap_candidates(
+        [first, second],
+        {
+            "first": [story("first", "same")],
+            "second": [story("second", "same"), story("second", "unique")],
+        },
+        10,
+    )
+    assert [item.title for item in result] == ["same", "unique"]

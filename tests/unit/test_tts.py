@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import importlib.metadata
+import sys
+import types
+import wave
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from morning_radio.audio import tts as tts_module
 from morning_radio.audio.production import (
     attach_audio_to_plan,
     build_text_production_plan,
@@ -229,3 +234,58 @@ def test_kokoro_rejects_empty_audio(tmp_path: Path) -> None:
 
     with pytest.raises(TTSError, match="no audio"):
         adapter.synthesize("Silent.", "af_heart", tmp_path / "silent.wav")
+
+
+@pytest.mark.parametrize("adapter", [ToneTTS(), KokoroTTS(pipeline_factory=lambda **kwargs: None)])
+def test_adapters_reject_unknown_voice_without_writing(tmp_path, adapter):
+    with pytest.raises(TTSError, match="Voice unavailable"):
+        adapter.synthesize("Hello", "not-a-voice", tmp_path / "bad.wav")
+    assert not (tmp_path / "bad.wav").exists()
+
+
+def test_kokoro_missing_import_is_actionable(monkeypatch):
+    monkeypatch.setitem(sys.modules, "kokoro", None)
+    assert not tts_module.kokoro_importable()
+    with pytest.raises(TTSError, match="not importable"):
+        KokoroTTS()
+
+
+def test_kokoro_default_factory_and_unknown_version(monkeypatch):
+    module = types.ModuleType("kokoro")
+    monkeypatch.setattr(module, "KPipeline", lambda **kwargs: iter(()), raising=False)
+    monkeypatch.setitem(sys.modules, "kokoro", module)
+
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    assert tts_module.kokoro_importable()
+    assert KokoroTTS().engine_version == "kokoro-unknown"
+    monkeypatch.setattr(module, "KPipeline", None)
+    with pytest.raises(TTSError, match="factory is unavailable"):
+        KokoroTTS()
+
+
+def test_kokoro_writer_concatenates_real_pcm(tmp_path):
+    import numpy as np
+
+    path = tmp_path / "audio.wav"
+    duration = tts_module.write_kokoro_audio(path, [np.zeros(1200), np.zeros(1200)], 24000)
+    assert duration == pytest.approx(0.1)
+    with wave.open(str(path)) as stream:
+        assert stream.getnframes() == 2400
+        assert stream.getframerate() == 24000
+
+
+def test_kokoro_writer_missing_dependency(monkeypatch, tmp_path):
+    monkeypatch.setitem(sys.modules, "soundfile", None)
+    with pytest.raises(TTSError, match="soundfile"):
+        tts_module.write_kokoro_audio(tmp_path / "missing.wav", [], 24000)
+
+
+def test_factory_rejects_unsupported_engine(monkeypatch):
+    monkeypatch.delenv("MORNING_RADIO_FAKE_TTS", raising=False)
+    with pytest.raises(TTSError, match="Unsupported"):
+        tts_module.build_tts_adapter("unknown")
+    with pytest.raises(TTSError, match="requires TTS settings"):
+        tts_module.build_tts_adapter("elevenlabs")

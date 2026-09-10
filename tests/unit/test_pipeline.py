@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import shutil
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from pydantic import HttpUrl
 
 from morning_radio import db, pipeline
@@ -31,6 +33,68 @@ from morning_radio.settings import (
     SelectionSettings,
     VerificationSettings,
 )
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (None, "unreadable"),
+        ("{", "invalid JSON"),
+        ("[]", "non-empty"),
+        ("[4]", "must be an object"),
+        ('[{"title":"Only title"}]', "title and category"),
+        (
+            '[{"title":"Story","category":"news","extraction_status":"bad"}]',
+            "invalid extraction_status",
+        ),
+    ],
+)
+def test_fixture_news_rejects_invalid_inputs(tmp_path, monkeypatch, content, message):
+    path = tmp_path / "articles.json"
+    if content is not None:
+        path.write_text(content)
+    monkeypatch.setattr(pipeline, "_fixture_news_path", lambda root: path)
+    with pytest.raises((RuntimeError, TypeError), match=message):
+        pipeline._fixture_news(tmp_path, tmp_path)
+
+
+@pytest.mark.parametrize("minutes", [4, 91])
+def test_pipeline_rejects_invalid_duration_before_side_effects(tmp_path, minutes):
+    with pytest.raises(ValueError, match="between 5 and 90"):
+        pipeline.run_morning(date(2026, 9, 10), minutes, root=tmp_path)
+    assert not (tmp_path / "data").exists()
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openai"])
+def test_pipeline_closes_owned_client_on_verifier_failure(tmp_path, monkeypatch, provider):
+    from morning_radio.llm.client import OllamaClient
+    from morning_radio.llm.openai import OpenAIClient
+    from morning_radio.profile.compiler import save_profile
+    from morning_radio.showgen.verify import VerificationUnavailableError
+
+    shutil.copytree(
+        Path(__file__).resolve().parents[2] / "config",
+        tmp_path / "config",
+        ignore=shutil.ignore_patterns("*.local.yaml"),
+    )
+    save_profile(default_profile(), tmp_path)
+    monkeypatch.delenv("MORNING_RADIO_FIXTURE_RUN", raising=False)
+    checks = []
+    monkeypatch.setattr(pipeline, "morning_preflight", lambda *args: checks.append(True))
+    client = object.__new__(OllamaClient if provider == "ollama" else OpenAIClient)
+    closed = []
+    monkeypatch.setattr(client, "close", lambda: closed.append(True))
+    monkeypatch.setattr(pipeline, "build_llm_client", lambda *args: client)
+
+    def fail(*args):
+        raise VerificationUnavailableError("verifier timed out")
+
+    monkeypatch.setattr(pipeline, "_run_pipeline", fail)
+    with pytest.raises(pipeline.MorningPipelineError) as error:
+        pipeline.run_morning(date(2026, 9, 10), None, root=tmp_path)
+    assert closed == [True]
+    assert checks == [True]
+    assert "did not complete" in error.value.action
 
 
 class RecordingLLM:

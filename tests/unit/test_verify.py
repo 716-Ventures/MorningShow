@@ -533,6 +533,22 @@ def test_unchanged_passage_correction_does_not_clear_failure(tmp_path):
     assert not (tmp_path / "script-final.md").exists()
 
 
+def test_correction_after_limit_is_not_published(tmp_path):
+    original = "[HOST]\nOriginal script.\n"
+    result = verify_script(original, [], tmp_path, CorrectingLLM(), maximum_correction_cycles=0)
+    assert result.script == original
+    assert result.verification.issues[0].category == "correction_cycle_limit"
+    assert not (tmp_path / "script-final.md").exists()
+
+
+def test_urls_fail_without_calling_model(tmp_path):
+    llm = CorrectingLLM()
+    result = verify_script("[HOST]\nVisit https://example.com/news today.\n", [], tmp_path, llm)
+    assert "url_readout" in {issue.category for issue in result.verification.issues}
+    assert llm.calls == 0
+    assert not (tmp_path / "script-final.md").exists()
+
+
 def test_plain_passage_correction_inherits_host_and_is_verified_again(tmp_path):
     class PlainCorrection(PassageLLM):
         def generate_structured(self, *args, **kwargs):
