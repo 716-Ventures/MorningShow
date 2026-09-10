@@ -5,6 +5,8 @@ Personal Morning Radio is a deliberately rough, local-first CLI that creates a r
 The operator interface is the repository-root `./show` command:
 
 ```bash
+./show setup
+./show providers
 ./show configure
 ./show morning
 ./show morning --minutes 20
@@ -16,10 +18,11 @@ The operator interface is the repository-root `./show` command:
 
 ## Setup
 
-The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13, `uv`, and Ollama. Python 3.14 is not supported. Audio generation is enabled with ElevenLabs (Nathaniel C), FFmpeg, and FFprobe. Kokoro remains available as an optional local provider.
+The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Supported providers are Ollama or OpenAI for scripts and Kokoro or ElevenLabs for speech. MP3 generation also needs FFmpeg and FFprobe.
 
 ```bash
 uv sync --locked --dev --python 3.12
+./show setup
 ./show doctor
 ./show configure
 ./show morning --minutes 10 --no-assets
@@ -27,9 +30,11 @@ uv sync --locked --dev --python 3.12
 
 Generated scripts and intermediate artifacts are written under `runs/YYYY-MM-DD/<run-id>/`, not `data/runs/`. The final command prints the episode and sources paths for audio runs, or script and sources paths for script-only runs.
 
-For script-only development, set `generate_audio: false` in `config/production.yaml`. Set it back to `true` to generate MP3s. `--no-assets` excludes music, bumpers, and beds; it does not disable speech synthesis or MP3 export. Install FFmpeg with `brew install ffmpeg`. Set the Ollama model name in `config/app.yaml`, pull that exact model with `ollama pull MODEL_NAME`, and keep Ollama running.
+Setup saves ignored machine-specific preferences in `config/providers.local.yaml`; these override the base `llm`, `tts`, and `generate_audio` settings. Re-run setup to change providers or disable audio. The first interactive generation opens setup automatically; unattended generation requires completing setup first. Your editorial profile is unchanged. See [production setup](docs/production-setup.md) for the provider catalog, recommendation policy, credential handling, and billing limitations.
 
-Speech preparation is configured under `tts` in `config/production.yaml`. Add names or terms to
+`--no-assets` excludes music, bumpers, and beds; it does not disable speech synthesis or MP3 export. Install FFmpeg with `brew install ffmpeg`. For local scripts, pull the selected model with `ollama pull MODEL_NAME` and keep Ollama running.
+
+Speech preparation is configured under `tts` in `config/providers.local.yaml` after setup (otherwise `config/production.yaml`). Add names or terms to
 `pronunciation_overrides` using the exact written form as the key and a phonetic, listener-facing
 form as the value. `inter_block_pause_ms` controls the short pause inserted between adjacent host
 paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_words`, with
@@ -38,7 +43,7 @@ unchanged.
 
 ### ElevenLabs Speech
 
-The committed configuration uses Voice ID `AkzTpEeeEWvyZf4umyCJ` (Nathaniel C) and `eleven_multilingual_v2`. Put your key in `.env` at the project root (next to `show`):
+The base configuration uses Voice ID `AkzTpEeeEWvyZf4umyCJ` (Nathaniel C) and `eleven_multilingual_v2`; setup can select a different provider or voice. Voice Library voices require a paid plan for API use. Creating a key or adding a voice does not remove that requirement. Setup accepts keys through hidden prompts, or you can put your key in `.env` at the project root (next to `show`):
 
 ```dotenv
 ELEVENLABS_API_KEY=your-key-here
@@ -66,7 +71,7 @@ The adapter uses the [ElevenLabs speech API](https://elevenlabs.io/docs/api-refe
 - writable `data/`
 - `config/app.yaml`, `config/feeds.yaml`, and `config/production.yaml`
 - SQLite state
-- Ollama reachability and configured model
+- Ollama reachability and configured model, or OpenAI credential presence (not billing/model eligibility)
 - FFmpeg and FFprobe when audio generation is enabled
 - TTS adapter availability when audio generation is enabled
 - at least one enabled feed
@@ -75,7 +80,7 @@ The POC uses live public feeds by default. Automated tests use fixtures and fake
 
 ## Offline Fixture Mode
 
-The normal morning command requires live feeds, Ollama, and the configured local model. For reproducible development tests, the pipeline also supports an explicit fixture mode:
+The normal morning command requires live feeds and the configured inference providers. For reproducible development tests, the pipeline also supports an explicit fixture mode:
 
 ```bash
 MORNING_RADIO_FIXTURE_RUN=1 \

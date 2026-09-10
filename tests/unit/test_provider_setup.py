@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -234,3 +235,89 @@ def test_cloud_preflight_does_not_contact_ollama(root, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     assert check_llm(settings)[0].ok
     assert "not verified" in check_llm(settings)[0].detail
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_hardware_mac_probe(tmp_path, monkeypatch, fails):
+    monkeypatch.setattr(setup.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(setup.platform, "machine", lambda: "arm64")
+
+    def probe(command, **kwargs):
+        assert command == ["/usr/sbin/sysctl", "-n", "hw.memsize"]
+        assert kwargs["timeout"] == 3
+        if fails:
+            raise subprocess.TimeoutExpired(command, 3)
+        return subprocess.CompletedProcess(command, 0, stdout=str(16 * 1024**3))
+
+    monkeypatch.setattr(setup.subprocess, "run", probe)
+    hardware = setup.detect_hardware(tmp_path)
+    assert hardware.memory_gib == (None if fails else 16)
+    assert hardware.free_disk_gib > 0
+
+
+def test_hardware_linux_and_unverified_gpu(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(setup.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(setup.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        setup.os, "sysconf", lambda name: {"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 4194304}[name]
+    )
+    assert setup.show_providers(tmp_path).memory_gib == 16
+    assert "GPU acceleration is not verified" in capsys.readouterr().out
+
+
+def test_cancel_after_entering_key_preserves_secrets(root):
+    (root / ".env").write_text("# retain\nOPENAI_API_KEY='previous'\n")
+    result = CliRunner().invoke(app, ["setup"], input="cloud\nn\n\ny\nnew-secret\nnew-secret\nn\n")
+    assert result.exit_code == 0
+    assert "new-secret" not in result.output
+    assert dotenv_values(root / ".env")["OPENAI_API_KEY"] == "previous"
+    assert not (root / "config/providers.local.yaml").exists()
+
+
+def test_openai_fixed_origin_and_missing_key(root, monkeypatch):
+    settings = LLMSettings(
+        provider="openai",
+        base_url=HttpUrl("http://untrusted.invalid"),
+        model="gpt-4.1-mini",
+        timeout_seconds=30,
+    )
+    with pytest.raises(LLMConnectionError, match="OPENAI_API_KEY"):
+        OpenAIClient(settings, root)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    client = OpenAIClient(settings, root)
+    try:
+        assert str(client._client.base_url) == "https://api.openai.com/v1/"
+        assert client._client.headers["Authorization"] == "Bearer test-key"
+    finally:
+        client.close()
+
+
+def test_openai_network_error_no_secret(root, monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("test-key", request=request)
+
+    client = client_for(root, monkeypatch, handler)
+    try:
+        with pytest.raises(LLMConnectionError, match="network request failed") as error:
+            client.generate_text("s", "u", stage="test", prompt_type="test")
+        assert "test-key" not in str(error.value)
+    finally:
+        client.close()
+
+
+def test_openai_validation_exhaustion(root, monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]}
+        )
+
+    client = client_for(root, monkeypatch, handler)
+    try:
+        with pytest.raises(LLMInvalidResponseError, match="three attempts"):
+            client.generate_structured("s", "u", Answer, stage="test", prompt_type="test")
+        assert len(calls) == 3
+    finally:
+        client.close()
