@@ -164,6 +164,10 @@ def run_benchmark(
     for key in ("MORNING_RADIO_FAKE_LLM", "MORNING_RADIO_FAKE_TTS", "MORNING_RADIO_FIXTURE_RUN"):
         if os.environ.get(key) == "1":
             raise ValueError(f"Unset {key} before a live benchmark")
+    if app.llm.provider != "ollama":
+        raise ValueError(
+            "Live benchmarks currently require Ollama; cloud benchmarks are not supported."
+        )
     client = OllamaClient(app.llm, output)
     adapter = None
     voice, _ = resolve_voices(production)

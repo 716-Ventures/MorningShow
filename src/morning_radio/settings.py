@@ -27,6 +27,7 @@ class Configuration(BaseModel):
 
 
 class LLMSettings(Configuration):
+    provider: Literal["ollama", "openai"] = "ollama"
     base_url: HttpUrl
     model: str
     timeout_seconds: int = Field(gt=0)
@@ -172,12 +173,33 @@ def _validated[TSettings: BaseModel](model: type[TSettings], path: Path) -> TSet
 
 def load_app_settings(root: Path | None = None) -> AppSettings:
     base = root or repo_root()
-    return _validated(AppSettings, base / "config" / "app.yaml")
+    settings = _validated(AppSettings, base / "config" / "app.yaml")
+    preferences = load_provider_preferences(base)
+    if preferences is not None:
+        settings.llm = preferences.llm
+    return settings
 
 
 def load_production_settings(root: Path | None = None) -> ProductionSettings:
     base = root or repo_root()
-    return _validated(ProductionSettings, base / "config" / "production.yaml")
+    settings = _validated(ProductionSettings, base / "config" / "production.yaml")
+    preferences = load_provider_preferences(base)
+    if preferences is not None:
+        settings.tts = preferences.tts
+        settings.generate_audio = preferences.generate_audio
+    return settings
+
+
+class ProviderPreferences(Configuration):
+    version: Literal[1] = 1
+    llm: LLMSettings
+    tts: TTSSettings
+    generate_audio: bool
+
+
+def load_provider_preferences(root: Path) -> ProviderPreferences | None:
+    path = root / "config" / "providers.local.yaml"
+    return _validated(ProviderPreferences, path) if path.exists() else None
 
 
 def load_feed_settings(root: Path | None = None) -> FeedSettings:

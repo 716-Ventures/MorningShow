@@ -31,6 +31,7 @@ def test_command_help_exits_zero() -> None:
 
 
 def test_morning_failure_prints_stage_and_action(monkeypatch) -> None:
+    monkeypatch.setattr("morning_radio.cli.ensure_setup", lambda root: None)
     import morning_radio.pipeline
 
     def fail_run(*args, **kwargs):
@@ -55,6 +56,7 @@ def test_morning_failure_prints_stage_and_action(monkeypatch) -> None:
 
 
 def test_morning_script_only_run_prints_script_without_episode(monkeypatch) -> None:
+    monkeypatch.setattr("morning_radio.cli.ensure_setup", lambda root: None)
     import morning_radio.pipeline
 
     monkeypatch.setattr(
@@ -162,6 +164,7 @@ def test_configure_passes_existing_profile(monkeypatch):
 
 
 def test_voice_preview_needs_no_ollama_or_news(monkeypatch, tmp_path):
+    monkeypatch.setattr("morning_radio.cli.ensure_setup", lambda root: None)
     import morning_radio.cli as cli
 
     shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
@@ -174,6 +177,7 @@ def test_voice_preview_needs_no_ollama_or_news(monkeypatch, tmp_path):
 
 
 def test_voice_preview_missing_key_is_actionable(monkeypatch, tmp_path):
+    monkeypatch.setattr("morning_radio.cli.ensure_setup", lambda root: None)
     import morning_radio.cli as cli
 
     shutil.copytree(REPO_ROOT / "config", tmp_path / "config")

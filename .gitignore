@@ -7,6 +7,7 @@ htmlcov/
 .venv/
 venv/
 .env
+config/providers.local.yaml
 .DS_Store
 data/app.db
 runs/

@@ -23,6 +23,7 @@ from morning_radio.audio.production import (
 )
 from morning_radio.dependencies import morning_preflight
 from morning_radio.llm.client import LLMClient, OllamaClient, build_llm_client
+from morning_radio.llm.openai import OpenAIClient
 from morning_radio.models import (
     CandidateStory,
     EditorialProfile,
@@ -105,7 +106,7 @@ def run_morning(
             ),
         ) from exc
     finally:
-        if isinstance(llm, OllamaClient):
+        if isinstance(llm, (OllamaClient, OpenAIClient)):
             llm.close()
 
 

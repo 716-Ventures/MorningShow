@@ -17,6 +17,7 @@ from morning_radio.dependencies import check_ffmpeg, check_llm, check_tts
 from morning_radio.profile.compiler import ProfileError, load_profile
 from morning_radio.profile.feedback import record_feedback
 from morning_radio.profile.interview import run_interview
+from morning_radio.provider_setup import ensure_setup, run_setup, show_providers
 from morning_radio.settings import (
     ConfigError,
     load_app_settings,
@@ -29,6 +30,22 @@ app = typer.Typer(no_args_is_help=True, help="Generate a local personal morning 
 console = Console()
 
 
+@app.command()
+def setup() -> None:
+    """Select local, cloud or mixed production providers for this machine."""
+    try:
+        run_setup(repo_root())
+    except (ValueError, ConfigError, OSError) as exc:
+        console.print(f"Setup failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def providers() -> None:
+    """Inspect hardware recommendations and supported providers without changing settings."""
+    show_providers(repo_root())
+
+
 @app.command("voice-preview")
 def voice_preview(
     text: str = "Good morning. Here's your briefing on AI, Apple, and the Buffalo Bills.",
@@ -38,6 +55,7 @@ def voice_preview(
         raise typer.BadParameter("Preview text must contain 1-500 characters.")
     root = repo_root()
     try:
+        ensure_setup(root)
         production = load_production_settings(root)
         run_dir = root / "runs" / "voice-previews" / uuid4().hex
         metadata = synthesize_script(
@@ -137,6 +155,7 @@ def morning(
     except ValueError as exc:
         raise typer.BadParameter("--date must be YYYY-MM-DD") from exc
     try:
+        ensure_setup(repo_root())
         result = run_morning(requested_date=requested_date, minutes=minutes, no_assets=no_assets)
     except Exception as exc:
         console.print(f"[red]Morning run failed:[/red] {exc}")

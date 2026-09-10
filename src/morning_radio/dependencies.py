@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from morning_radio.audio.elevenlabs import ElevenLabsTTS
 from morning_radio.audio.tts import build_tts_adapter, kokoro_importable
+from morning_radio.credentials import read_credential
 from morning_radio.settings import AppSettings, ProductionSettings
 
 
@@ -69,6 +70,18 @@ def check_ffmpeg() -> list[DependencyCheck]:
 
 
 def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
+    if app_settings.llm.provider == "openai":
+        key = read_credential("OPENAI_API_KEY")
+        return [
+            DependencyCheck(
+                "OpenAI credential configured",
+                bool(key),
+                "Credential present; billing and model access are not verified."
+                if key
+                else "Missing key",
+                "Set OPENAI_API_KEY in .env. Generation requires API billing; ChatGPT plans do not include it.",
+            )
+        ]
     try:
         response = httpx.get(f"{str(app_settings.llm.base_url).rstrip('/')}/api/tags", timeout=5)
         response.raise_for_status()

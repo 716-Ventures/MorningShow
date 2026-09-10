@@ -224,6 +224,10 @@ class FakeLLM:
 def build_llm_client(settings: LLMSettings, run_dir: Path) -> LLMClient:
     if os.environ.get("MORNING_RADIO_FAKE_LLM") == "1":
         return FakeLLM()
+    if settings.provider == "openai":
+        from morning_radio.llm.openai import OpenAIClient
+
+        return OpenAIClient(settings, run_dir)
     return OllamaClient(settings, run_dir)
 
 
