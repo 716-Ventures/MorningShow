@@ -7,7 +7,7 @@ import zlib
 import httpx
 import pytest
 
-from morning_radio.newsroom.download import BoundedBody, get_checked_response_async
+from morning_radio.newsroom.download import BoundedBody, get_checked_response_async, read_body
 from morning_radio.newsroom.fetch import UnsafeUrlError
 
 
@@ -78,3 +78,44 @@ def test_total_deadline_stops_slow_stream_and_closes_it():
 
     asyncio.run(run())
     assert body.closed
+
+
+def test_unsupported_encoding_fails_closed():
+    with pytest.raises(UnsafeUrlError, match="Unsupported content encoding"):
+        BoundedBody("br", 100)
+
+
+def test_prebuffered_oversized_response_rejected():
+    with pytest.raises(UnsafeUrlError, match="size limit"):
+        read_body(httpx.Response(200, content=b"too much"), 2)
+
+
+@pytest.mark.parametrize("mode", ["missing", "loop", "limit"])
+def test_async_bad_redirects_stop_and_close(mode):
+    responses = []
+
+    def respond(request):
+        headers = (
+            {}
+            if mode == "missing"
+            else {"Location": "/same" if mode == "loop" else f"/step-{len(responses)}"}
+        )
+        response = httpx.Response(302, headers=headers)
+        responses.append(response)
+        return response
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with pytest.raises(
+                UnsafeUrlError,
+                match={
+                    "missing": "missing Location",
+                    "loop": "loop detected",
+                    "limit": "limit exceeded",
+                }[mode],
+            ):
+                await get_checked_response_async("http://93.184.216.34/start", client)
+
+    asyncio.run(run())
+    assert all(response.is_closed for response in responses)
+    assert len(responses) == {"missing": 1, "loop": 2, "limit": 6}[mode]

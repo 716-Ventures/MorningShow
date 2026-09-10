@@ -103,7 +103,7 @@ uv run pyright
 uv run pytest --cov=morning_radio --cov-branch --cov-report=term-missing -q
 ```
 
-The suite includes isolated script-only and MP3 fixture runs, a wheel-build check, real FFmpeg signal/bed-continuity tests, and a versioned editorial evaluation corpus. It does not need a running Ollama instance or download TTS weights. Pyright checks the whole project, with strict mode on configuration, LLM responses, URL validation, downloads, and network transport. CI enforces the lockfile, formatting, lint, type checks, and at least 85% branch-aware combined coverage.
+The suite includes isolated script-only and MP3 fixture runs, a wheel-build check, real FFmpeg signal/bed-continuity tests, and a versioned editorial evaluation corpus. It does not need a running Ollama instance or download TTS weights. Pyright checks the whole project, with strict mode on configuration, LLM responses, URL validation, downloads, and network transport. CI enforces the lockfile, formatting, lint, type checks, and at least 90% branch-aware combined coverage. Install the `tts` extra to include the real PCM writer test; without those optional dependencies that test is skipped.
 
 Every episode writes `performance.json` with monotonic stage durations and process/subprocess memory high-water marks. Model-call logs separate Ollama loading from token-generation time. These measurements do not include the external Ollama process in Python's RSS.
 

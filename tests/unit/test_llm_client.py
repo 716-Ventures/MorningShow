@@ -8,7 +8,7 @@ import respx
 from httpx import Response
 from pydantic import BaseModel, HttpUrl
 
-from morning_radio.llm.client import LLMInvalidResponseError, OllamaClient
+from morning_radio.llm.client import LLMConnectionError, LLMInvalidResponseError, OllamaClient
 from morning_radio.settings import LLMSettings
 
 
@@ -98,5 +98,42 @@ def test_thinking_option_and_server_timing_metadata(tmp_path):
         metrics = json.loads((tmp_path / "logs/model-calls.jsonl").read_text())
         assert metrics["load_duration_ns"] == 100
         assert metrics["eval_count"] == 2
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("structured", [False, True])
+def test_ollama_http_failure_is_not_retried(tmp_path, structured):
+    client = OllamaClient(
+        LLMSettings(base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5),
+        tmp_path,
+    )
+    try:
+        with respx.mock as router:
+            route = router.post("http://ollama.test/api/generate").respond(503)
+            with pytest.raises(LLMConnectionError):
+                if structured:
+                    client.generate_structured(
+                        "s", "u", TinyResponse, stage="test", prompt_type="test"
+                    )
+                else:
+                    client.generate_text("s", "u", stage="test", prompt_type="test")
+            assert route.call_count == 1
+        log = json.loads((tmp_path / "logs/model-calls.jsonl").read_text())
+        assert log["success"] is False
+    finally:
+        client.close()
+
+
+def test_ollama_empty_text_is_rejected(tmp_path):
+    client = OllamaClient(
+        LLMSettings(base_url=HttpUrl("http://ollama.test"), model="test", timeout_seconds=5),
+        tmp_path,
+    )
+    try:
+        with respx.mock as router:
+            router.post("http://ollama.test/api/generate").respond(200, json={"response": " "})
+            with pytest.raises(LLMInvalidResponseError, match="empty response"):
+                client.generate_text("s", "u", stage="test", prompt_type="test")
     finally:
         client.close()

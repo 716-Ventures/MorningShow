@@ -267,7 +267,8 @@ def test_kokoro_default_factory_and_unknown_version(monkeypatch):
 
 
 def test_kokoro_writer_concatenates_real_pcm(tmp_path):
-    import numpy as np
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
 
     path = tmp_path / "audio.wav"
     duration = tts_module.write_kokoro_audio(path, [np.zeros(1200), np.zeros(1200)], 24000)

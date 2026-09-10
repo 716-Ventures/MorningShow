@@ -7,8 +7,12 @@ import httpcore
 import httpx
 import pytest
 
-from morning_radio.newsroom.fetch import UnsafeUrlError, resolve_public_addresses
-from morning_radio.newsroom.transport import PublicAsyncTransport, PublicNetworkBackend
+from morning_radio.newsroom.fetch import (
+    UnsafeUrlError,
+    resolve_public_addresses,
+    validate_public_url,
+)
+from morning_radio.newsroom.transport import PublicAsyncTransport, PublicNetworkBackend, http_errors
 
 
 @pytest.mark.parametrize(
@@ -95,3 +99,65 @@ def test_backend_timeout_is_bounded(monkeypatch):
             await PublicNetworkBackend(Backend()).connect_tcp("93.184.216.34", 443, timeout=0.01)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "url", ["http://[invalid", "https:///no-host", "https://example.com:invalid"]
+)
+def test_malformed_urls_fail_before_dns(url):
+    with pytest.raises(UnsafeUrlError):
+        validate_public_url(url)
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_dns_failure_and_empty_result_are_actionable(monkeypatch, fails):
+    def resolve(*args, **kwargs):
+        if fails:
+            raise socket.gaierror("not found")
+        return []
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(UnsafeUrlError, match="host"):
+        resolve_public_addresses("missing.test")
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+def test_backend_tries_validated_addresses_in_order(monkeypatch, exhausted):
+    from morning_radio.newsroom import transport
+
+    addresses = ["93.184.216.34", "1.1.1.1"]
+    monkeypatch.setattr(transport, "resolve_public_addresses", lambda host: addresses)
+    calls = []
+    stream = httpcore.AsyncMockStream([])
+
+    class Backend(httpcore.AsyncNetworkBackend):
+        async def connect_tcp(self, host, *args, **kwargs):
+            calls.append(host)
+            if host == addresses[0] or exhausted:
+                raise httpcore.ConnectError("unreachable")
+            return stream
+
+    async def run():
+        backend = PublicNetworkBackend(Backend())
+        if exhausted:
+            with pytest.raises(httpcore.ConnectError, match="unreachable"):
+                await backend.connect_tcp("news.test", 443)
+        else:
+            assert await backend.connect_tcp("news.test", 443) is stream
+
+    asyncio.run(run())
+    assert calls == addresses
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpcore.ReadTimeout("slow"), httpx.TimeoutException),
+        (httpcore.ConnectError("offline"), httpx.TransportError),
+        (httpcore.RemoteProtocolError("bad"), httpx.TransportError),
+    ],
+)
+def test_transport_errors_are_mapped_with_cause(error, expected):
+    with pytest.raises(expected) as caught, http_errors():
+        raise error
+    assert caught.value.__cause__ is error
