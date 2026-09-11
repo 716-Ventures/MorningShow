@@ -168,6 +168,8 @@ def test_numbered_menu_retries_then_cancels_without_changes(root):
     assert "Choose one of the listed options" in result.output
     assert "1. local (default)" in result.output
     assert "1 / Production" in result.output
+    assert "subscription or API usage" in " ".join(result.output.split())
+    assert "API billing applies" not in result.output
     assert "2 / Review" in result.output
     assert "Setup cancelled" in result.output
     assert "af_bella" in result.output

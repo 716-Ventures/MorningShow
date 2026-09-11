@@ -45,11 +45,11 @@ def _details(rows: list[tuple[str, str]]) -> None:
 
 CHOICE_DESCRIPTIONS = {
     "local": "Scripts and speech on this machine",
-    "cloud": "Hosted scripts and speech; API billing applies",
+    "cloud": "Hosted scripts and speech; subscription or API usage",
     "mixed": "Choose script and speech providers separately",
     "keep": "Keep the currently configured providers",
     "ollama": "Local script generation",
-    "openai": "Cloud script generation",
+    "openai": "Cloud scripts via OpenAI API; separate API billing",
     "codex": "ChatGPT subscription via Codex; subscription limits apply",
     "kokoro": "Local speech",
     "elevenlabs": "Cloud speech; credits and voice access required",
