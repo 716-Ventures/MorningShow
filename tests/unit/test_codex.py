@@ -54,6 +54,7 @@ class FakeServer(CodexRPC):
                     "params": {"loginId": "login", "success": self.browser_ok},
                 }
             )
+            self.events.append({"method": "account/updated", "params": {"authMode": "chatgpt"}})
             return {
                 "loginId": "login",
                 "authUrl": "https://auth.openai.com/authorize?state=secret-state",
@@ -354,6 +355,54 @@ def test_malformed_generation_stops_and_closes(root, server, monkeypatch):
     with pytest.raises(LLMInvalidResponseError, match="malformed generation"):
         client.generate_text("s", "u", stage="test", prompt_type="test")
     assert server.closed
+
+
+@pytest.mark.parametrize("update_first", [False, True])
+def test_sign_in_waits_for_account_update(server, monkeypatch, update_first):
+    server.account = None
+    monkeypatch.setattr(codex.webbrowser, "open", lambda url: True)
+    events = deque(
+        [
+            {"method": "account/login/completed", "params": {"loginId": "other", "success": True}},
+            {"method": "account/updated", "params": {"authMode": None}},
+        ]
+    )
+    completion = {
+        "method": "account/login/completed",
+        "params": {"loginId": "login", "success": True},
+    }
+    update = {"method": "account/updated", "params": {"authMode": "chatgpt"}}
+    events.extend([update, completion] if update_first else [completion, update])
+
+    def next_event(deadline):
+        event = events.popleft()
+        if event is update:
+            server.account = {"type": "chatgpt", "planType": "plus"}
+        return event
+
+    monkeypatch.setattr(server, "event", next_event)
+    codex.sign_in(server)
+    assert not events
+    assert ("account/read", {"refreshToken": False}) in server.calls
+    assert not any(method == "account/login/cancel" for method, _ in server.calls)
+
+
+def test_sign_in_missing_account_update_times_out_and_cancels(server, monkeypatch):
+    monkeypatch.setattr(codex.webbrowser, "open", lambda url: True)
+    events = deque(
+        [{"method": "account/login/completed", "params": {"loginId": "login", "success": True}}]
+    )
+
+    def next_event(deadline):
+        if events:
+            return events.popleft()
+        raise LLMConnectionError("Codex request timed out.")
+
+    monkeypatch.setattr(server, "event", next_event)
+    with pytest.raises(LLMConnectionError, match="timed out"):
+        codex.sign_in(server)
+    assert ("account/login/cancel", {"loginId": "login"}) in server.calls
+    assert not any(method == "account/read" for method, _ in server.calls)
 
 
 @pytest.mark.parametrize("login", [True, False])

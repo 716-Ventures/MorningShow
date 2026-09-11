@@ -21,7 +21,7 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def require_chatgpt(server: CodexRPC) -> dict[str, Any]:
-    account = server.request("account/read", {"refreshToken": True}).get("account")
+    account = server.request("account/read", {"refreshToken": False}).get("account")
     if not isinstance(account, dict) or account.get("type") != "chatgpt":
         raise LLMConnectionError(
             "ChatGPT sign-in required. Run ./show codex-login. API-key authentication is not used by this provider."
@@ -82,6 +82,8 @@ def sign_in(server: CodexRPC) -> None:
                 "Could not open the sign-in browser. Configure a default browser and retry ./show codex-login."
             )
         deadline = time.monotonic() + 300
+        completed = False
+        account_ready = False
         while True:
             event = server.event(deadline)
             params = event.get("params", {})
@@ -89,10 +91,15 @@ def sign_in(server: CodexRPC) -> None:
                 event.get("method") == "account/login/completed"
                 and params.get("loginId") == login_id
             ):
-                if not params.get("success"):
+                if params.get("success") is not True:
                     raise LLMConnectionError(
                         "ChatGPT sign-in failed or was cancelled. Run ./show codex-login to retry."
                     )
+                completed = True
+            elif event.get("method") == "account/updated":
+                account_ready = params.get("authMode") == "chatgpt"
+            # Login completion can precede the server's in-memory account update.
+            if completed and account_ready:
                 require_chatgpt(server)
                 return
     except BaseException:
