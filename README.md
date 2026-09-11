@@ -14,11 +14,13 @@ The operator interface is the repository-root `./show` command:
 ./show feedback
 ./show doctor
 ./show voice-preview
+./show codex-login
+./show codex-status
 ```
 
 ## Setup
 
-The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Supported providers are Ollama or OpenAI for scripts and Kokoro or ElevenLabs for speech. MP3 generation also needs FFmpeg and FFprobe.
+The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Script providers are Ollama, OpenAI API, or ChatGPT subscription via Codex. Speech providers are Kokoro or ElevenLabs. MP3 generation also needs FFmpeg and FFprobe.
 
 ```bash
 uv sync --locked --dev --python 3.12
@@ -40,6 +42,21 @@ form as the value. `inter_block_pause_ms` controls the short pause inserted betw
 paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_words`, with
 `sentence_pause_ms` inserted between those groups. Explicit `[PAUSE: ...]` directives are left
 unchanged.
+
+### ChatGPT Subscription via Codex
+
+With the Codex CLI installed on PATH, run `./show setup`, choose `mixed`, select
+`codex` for scripts, and choose `kokoro` for local speech (or `none` for scripts
+only). Setup offers browser sign-in and lists models reported by Codex. This uses
+your eligible ChatGPT plan's Codex allowance, not `OPENAI_API_KEY`. Speech remains
+separate, and subscription limits or account credit policies still apply.
+
+`./show codex-login` connects or reconnects the account. `./show codex-status`
+checks sign-in, reported allowance, and the model catalog without generation.
+`./show codex-logout` disconnects only MorningShow. Auth is stored in ignored,
+owner-only `data/codex/home`, separate from your normal Codex installation. See
+[production setup](docs/production-setup.md#chatgpt-subscription-via-codex) for
+privacy, runtime requirements, and validation limitations.
 
 ### ElevenLabs Speech
 
@@ -71,7 +88,7 @@ The adapter uses the [ElevenLabs speech API](https://elevenlabs.io/docs/api-refe
 - writable `data/`
 - `config/app.yaml`, `config/feeds.yaml`, and `config/production.yaml`
 - SQLite state
-- Ollama reachability and configured model, or OpenAI credential presence (not billing/model eligibility)
+- Ollama reachability and configured model, OpenAI credential presence (not billing/model eligibility), or Codex ChatGPT sign-in and model availability
 - FFmpeg and FFprobe when audio generation is enabled
 - TTS adapter availability when audio generation is enabled
 - at least one enabled feed

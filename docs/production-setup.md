@@ -15,13 +15,73 @@ output remains readable without ANSI color codes.
 
 | Stage | Local | Cloud |
 | --- | --- | --- |
-| Research, clustering, writing, verification, feedback | Ollama: Qwen3 4B or 8B | OpenAI: GPT-4.1 mini or GPT-4.1 |
+| Research, clustering, writing, verification, feedback | Ollama: Qwen3 4B or 8B | OpenAI API: GPT-4.1 mini or GPT-4.1; ChatGPT via Codex: discovered models |
 | Speech | Kokoro: Bella and six other built-in voices | ElevenLabs: an account-accessible Voice ID |
 
 Choose local, cloud, or mixed. Mixed selects each stage independently, for example
 OpenAI scripts with local Bella speech. Audio can also be disabled entirely.
 Existing users can choose `keep` to adopt current settings without changing models.
 `./show configure` still edits editorial interests, not provider preferences.
+
+## ChatGPT subscription via Codex
+
+The `codex` script provider integrates the Codex app-server using its managed
+ChatGPT browser login. It is separate from the `openai` API-key provider; selecting
+it never silently switches to API-key billing. An eligible ChatGPT account and
+Codex allowance are required. The model list comes from `model/list` at setup,
+not the OpenAI API catalog. Actual access remains subject to account restrictions.
+
+1. Install a Codex CLI with app-server support on PATH. The integration was checked
+   against CLI 0.146.0 on macOS. The subprocess transport targets macOS/Linux.
+2. Run `./show setup`, choose `mixed`, then `codex` for scripts and `kokoro` for
+   local speech, or `none` for script-only production. Cloud mode also offers Codex
+   scripts with ElevenLabs speech.
+3. Accept browser sign-in when offered, finish authorization in your browser, and
+   return to setup. Select a listed model and confirm the preferences.
+4. Run `./show doctor`, then `./show morning`.
+
+Separate account commands:
+
+```bash
+./show codex-login
+./show codex-status
+./show codex-logout
+```
+
+Login waits up to five minutes. Failed or interrupted login cancels the pending
+flow and closes its server. Logout affects only MorningShow. Setup, login, and
+status can contact OpenAI for authentication, models, and usage metadata but make
+no generation requests. Login is a separate account action: cancelling setup
+after successful login leaves the account connected without saving new preferences.
+
+Codex stores its managed authentication under the ignored `data/codex/home`
+directory, protected with owner-only directory permissions. Tokens are not copied
+from your normal Codex login or stored in `.env`. The child process does not inherit
+API keys, your usual `CODEX_HOME`, or your usual Codex configuration. Do not commit
+or share the contents of `data/codex`. The provider's `llm.base_url` is unused.
+
+Each generation gets an ephemeral thread in a separate workspace, with read-only
+sandboxing, network-disabled tool execution, and shell, browser, app, hook, and
+image-generation features disabled. The adapter rejects server tool/approval
+requests. Article text and relevant editorial context are sent to OpenAI for
+generation, under the account's Codex/ChatGPT policies. This is not local inference.
+
+Completed final-answer events, not commentary or partial streaming deltas, supply
+the script. Structured responses are validated with the same Pydantic schemas as
+other providers. MorningShow adds no retries to Codex generation or validation
+failures; Codex itself manages its service transport. Existing newsroom fallbacks
+still apply, and verification must pass before an episode can be published.
+The owned process closes at the end of a run or after a transport failure.
+
+Subscription allowance is shared with other Codex use. `codex-status` displays the
+reported remaining percentages, or explicitly says unavailable. It does not buy
+credits, redeem resets, or guarantee sufficient allowance for a complete episode.
+Account credit policies may allow additional usage; this app does not change them.
+OpenAI API billing and speech-provider billing remain separate choices.
+
+Validation includes offline login, catalog, output, failure, and real subprocess
+protocol tests. A real installed-CLI handshake was checked without account login.
+Live authenticated generation was not performed as part of implementation.
 
 ## Machine recommendations
 
@@ -55,7 +115,8 @@ Cloud keys can be entered through hidden, repeated prompts. They are written onl
 after final confirmation, to the ignored project `.env`, with owner-only access.
 Existing dotenv entries are preserved. Shell environment values take precedence,
 including empty values; setup warns when an overriding variable exists. Cancel
-before saving leaves preferences and credentials unchanged.
+before saving leaves preferences and API keys unchanged. Codex browser sign-in is
+a separate account action, as described above.
 
 ## Billing, privacy, and checks
 
@@ -87,4 +148,6 @@ of the test suite. Run `.venv/bin/pytest`, `.venv/bin/ruff check .`, and
 Provider references: [Qwen3 4B](https://ollama.com/library/qwen3:4b),
 [Qwen3 8B](https://ollama.com/library/qwen3:8b),
 [GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini),
-[OpenAI Chat API](https://developers.openai.com/api/reference/resources/chat).
+[OpenAI Chat API](https://developers.openai.com/api/reference/resources/chat),
+[Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Codex authentication](https://learn.chatgpt.com/docs/auth).
