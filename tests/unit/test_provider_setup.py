@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from io import StringIO
 from pathlib import Path
 
 import httpx
 import pytest
 from dotenv import dotenv_values
 from pydantic import BaseModel, HttpUrl
+from rich.console import Console
+from rich.text import Text
 from typer.testing import CliRunner
 
 from morning_radio import provider_setup as setup
@@ -130,6 +133,70 @@ def test_catalog_is_read_only(root):
     assert "qwen3:4b" in result.output
     assert "paid plan" in result.output
     assert not (root / "config/providers.local.yaml").exists()
+
+
+@pytest.mark.parametrize("width", [40, 80, 120])
+@pytest.mark.parametrize("color", [False, True])
+def test_catalog_layout_wraps_with_and_without_color(root, monkeypatch, width, color):
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    output = StringIO()
+    monkeypatch.setattr(
+        setup,
+        "console",
+        Console(
+            file=output,
+            width=width,
+            force_terminal=color,
+            color_system="standard" if color else None,
+        ),
+    )
+    setup.show_providers(root)
+    rendered = output.getvalue()
+    plain = Text.from_ansi(rendered).plain
+    assert max(len(line) for line in plain.splitlines()) <= width
+    assert "Your machine" in plain
+    assert "Supported providers" in plain
+    assert "Before you choose" in plain
+    assert "qwen3:4b" in plain
+    assert ("\x1b[" in rendered) is color
+
+
+def test_numbered_menu_retries_then_cancels_without_changes(root):
+    result = CliRunner().invoke(app, ["setup"], input="0\n1\ny\n1\n1\nn\n")
+    assert result.exit_code == 0, result.output
+    assert "Choose one of the listed options" in result.output
+    assert "1. local (default)" in result.output
+    assert "1 / Production" in result.output
+    assert "2 / Review" in result.output
+    assert "Setup cancelled" in result.output
+    assert "af_bella" in result.output
+    assert not (root / "config/providers.local.yaml").exists()
+
+
+def test_numbered_menu_saves_same_preferences_as_names(root):
+    result = CliRunner().invoke(app, ["setup"], input="1\ny\n1\n1\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "3 / Ready" in result.output
+    assert "Next: ./show doctor" in result.output
+    assert load_app_settings(root).llm.model == "qwen3:4b"
+    assert load_production_settings(root).tts.voice == "af_bella"
+
+
+def test_summary_treats_configuration_as_literal_text(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(setup, "console", Console(file=output, width=80))
+    setup._details([("Voice", "[red]untrusted[/red]")])
+    assert "[red]untrusted[/red]" in output.getvalue()
+
+
+def test_setup_respects_no_color(root, monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    output = StringIO()
+    monkeypatch.setattr(setup, "console", Console(file=output, force_terminal=False))
+    setup.show_providers(root)
+    assert "\x1b[" not in output.getvalue()
+    assert "Local recommendation" in output.getvalue()
 
 
 def test_credentials_preserve_existing(root):

@@ -13,6 +13,9 @@ from pathlib import Path
 import typer
 import yaml
 from pydantic import HttpUrl
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 
 from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.credentials import save_credentials
@@ -22,6 +25,42 @@ from morning_radio.settings import (
     load_production_settings,
     load_provider_preferences,
 )
+
+console = Console(highlight=False)
+
+
+def _section(title: str) -> None:
+    console.print()
+    console.rule(Text(title, style="bold cyan"), align="left", style="cyan")
+
+
+def _details(rows: list[tuple[str, str]]) -> None:
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", max_width=16)
+    table.add_column(overflow="fold")
+    for label, value in rows:
+        table.add_row(Text(label), Text(value))
+    console.print(table)
+
+
+CHOICE_DESCRIPTIONS = {
+    "local": "Scripts and speech on this machine",
+    "cloud": "Hosted scripts and speech; API billing applies",
+    "mixed": "Choose script and speech providers separately",
+    "keep": "Keep the currently configured providers",
+    "ollama": "Local script generation",
+    "openai": "Cloud script generation",
+    "kokoro": "Local speech",
+    "elevenlabs": "Cloud speech; credits and voice access required",
+    "none": "Script only; no audio",
+    "af_bella": "Bella",
+    "af_heart": "Heart",
+    "af_nicole": "Nicole",
+    "am_adam": "Adam",
+    "am_michael": "Michael",
+    "bf_emma": "Emma",
+    "bm_george": "George",
+}
 
 
 @dataclass(frozen=True)
@@ -70,47 +109,80 @@ def recommend_model(hardware: Hardware) -> str | None:
 def show_providers(root: Path) -> Hardware:
     hardware = detect_hardware(root)
     memory = f"{hardware.memory_gib:.1f} GiB" if hardware.memory_gib else "unknown RAM"
-    typer.echo(
-        f"Machine: {hardware.system} {hardware.architecture}, {memory}, "
-        f"{hardware.cpu_count} CPUs, {hardware.free_disk_gib:.1f} GiB disk free"
+    _section("Your machine")
+    _details(
+        [
+            ("System", f"{hardware.system} / {hardware.architecture}"),
+            ("Memory", memory),
+            ("Processors", str(hardware.cpu_count)),
+            ("Disk available", f"{hardware.free_disk_gib:.1f} GiB"),
+        ]
     )
     model = recommend_model(hardware)
-    typer.echo(
-        f"Local recommendation: {model + ' + Kokoro' if model else 'insufficient or unknown resources; no confident recommendation'}"
+    console.print()
+    console.print(
+        f"Local recommendation: {model + ' + Kokoro' if model else 'insufficient or unknown resources; no confident recommendation'}",
+        style="bold green" if model else "yellow",
+        markup=False,
     )
-    typer.echo(
+    console.print(
         "Sizing is conservative, not a speed guarantee. Other running apps and context size matter."
     )
     if hardware.system != "Darwin" or hardware.architecture != "arm64":
-        typer.echo("GPU acceleration is not verified; CPU-only generation can be slow.")
-    typer.echo(
-        "Scripts: ollama (local: qwen3:4b, qwen3:8b); openai (cloud: gpt-4.1-mini, gpt-4.1)."
+        console.print(
+            "GPU acceleration is not verified; CPU-only generation can be slow.", style="yellow"
+        )
+    _section("Supported providers")
+    _details(
+        [
+            ("Local scripts", "Ollama / qwen3:4b, qwen3:8b"),
+            ("Cloud scripts", "OpenAI / gpt-4.1-mini, gpt-4.1"),
+            ("Local speech", "Kokoro"),
+            ("Cloud speech", "ElevenLabs"),
+            ("Without speech", "Script-only production"),
+        ]
     )
-    typer.echo("Speech: kokoro (local); elevenlabs (cloud); none (script only).")
-    typer.echo(
-        "Local inference has no API bill; news fetching and first model downloads still need internet."
-    )
-    typer.echo(
-        "OpenAI requires API billing, separate from ChatGPT. Cloud receives article/profile or speech text."
-    )
-    typer.echo(
-        "ElevenLabs needs credits and voice access. Voice Library API voices require a paid plan; a key alone does not grant access."
+    _section("Before you choose")
+    _details(
+        [
+            ("Local", "No API bill. News and first model downloads still need internet."),
+            ("OpenAI", "API billing is separate from ChatGPT."),
+            (
+                "ElevenLabs",
+                "Credits and voice access required. Voice Library API voices require a paid plan; a key alone does not grant access.",
+            ),
+            ("Cloud privacy", "Article/profile or speech text is sent to the selected provider."),
+        ]
     )
     return hardware
 
 
 def _choice(label: str, choices: tuple[str, ...], default: str) -> str:
+    console.print()
+    console.print(label, style="bold cyan", markup=False)
+    for index, choice in enumerate(choices, start=1):
+        line = Text(f"  {index}. ", style="cyan")
+        line.append(choice, style="bold")
+        if choice == default:
+            line.append(" (default)", style="green")
+        description = CHOICE_DESCRIPTIONS.get(choice)
+        if description:
+            line.append(f" - {description}")
+        console.print(line)
     while True:
-        value = typer.prompt(f"{label} ({', '.join(choices)})", default=default).strip().lower()
+        value = typer.prompt("Select number or name", default=default).strip().lower()
+        if value in {str(index) for index in range(1, len(choices) + 1)}:
+            return choices[int(value) - 1]
         if value in choices:
             return value
-        typer.echo("Choose one of the listed options.")
+        console.print("Choose one of the listed options.", style="yellow")
 
 
 def run_setup(root: Path) -> bool:
     hardware = show_providers(root)
     app = load_app_settings(root)
     production = load_production_settings(root)
+    _section("1 / Production")
     mode = _choice("Production mode", ("local", "cloud", "mixed", "keep"), "local")
     if mode != "keep":
         text_provider = "ollama" if mode == "local" else "openai"
@@ -126,6 +198,7 @@ def run_setup(root: Path) -> bool:
             if recommended is None and not typer.confirm(
                 "Local performance cannot be recommended. Continue anyway?", default=False
             ):
+                console.print("Setup cancelled. No settings were changed.", style="yellow")
                 return False
             model = _choice("Local model", ("qwen3:4b", "qwen3:8b"), recommended or "qwen3:4b")
             app.llm = app.llm.model_copy(
@@ -185,9 +258,17 @@ def run_setup(root: Path) -> bool:
             "generate_audio": production.generate_audio,
         }
     )
-    typer.echo(f"Scripts: {preferences.llm.provider} / {preferences.llm.model}")
-    typer.echo(
-        f"Speech: {preferences.tts.engine + ' / ' + str(preferences.tts.voice) if preferences.generate_audio else 'disabled'}"
+    _section("2 / Review")
+    _details(
+        [
+            ("Scripts", f"{preferences.llm.provider} / {preferences.llm.model}"),
+            (
+                "Speech",
+                preferences.tts.engine + " / " + str(preferences.tts.voice)
+                if preferences.generate_audio
+                else "disabled",
+            ),
+        ]
     )
     keys: dict[str, str] = {}
     required = []
@@ -195,6 +276,8 @@ def run_setup(root: Path) -> bool:
         required.append("OPENAI_API_KEY")
     if preferences.generate_audio and preferences.tts.engine == "elevenlabs":
         required.append("ELEVENLABS_API_KEY")
+    if required:
+        _section("Credentials")
     for name in required:
         if typer.confirm(
             f"Add or replace {name} in .env? (No keeps existing credentials)", default=False
@@ -203,28 +286,39 @@ def run_setup(root: Path) -> bool:
             if key:
                 keys[name] = key
         if name in os.environ:
-            typer.echo(f"Warning: shell variable {name} overrides the .env value, even when empty.")
+            console.print(
+                f"Warning: shell variable {name} overrides the .env value, even when empty.",
+                style="yellow",
+                markup=False,
+            )
+    console.print()
     if not typer.confirm("Save these production preferences?", default=True):
+        console.print("Setup cancelled. No settings were changed.", style="yellow")
         return False
     save_credentials(root, keys)
     atomic_write_text(
         root / "config" / "providers.local.yaml",
         yaml.safe_dump(preferences.model_dump(mode="json"), sort_keys=False),
     )
-    typer.echo(
-        "Saved config/providers.local.yaml. Editorial interests and base YAML files are unchanged."
-    )
+    _section("3 / Ready")
+    console.print("Saved config/providers.local.yaml", style="bold green")
+    console.print("Editorial interests and base YAML files are unchanged.")
+    console.print()
     if preferences.llm.provider == "ollama":
-        typer.echo(f"Install/start Ollama, then run: ollama pull {preferences.llm.model}")
+        console.print("Install/start Ollama, then run:")
+        console.print(f"  ollama pull {preferences.llm.model}", style="cyan", markup=False)
     else:
-        typer.echo("Add OPENAI_API_KEY to the project .env file.")
+        console.print("OPENAI_API_KEY is read from the project .env file.")
     if preferences.generate_audio and preferences.tts.engine == "kokoro":
-        typer.echo("Install the local speech runtime: uv sync --dev --extra tts --python 3.12")
+        console.print("Install the local speech runtime:")
+        console.print("  uv sync --dev --extra tts --python 3.12", style="cyan")
     if preferences.generate_audio and preferences.tts.engine == "elevenlabs":
-        typer.echo(
-            "Add ELEVENLABS_API_KEY to the project .env file; ensure the voice is permitted by your plan."
+        console.print(
+            "ELEVENLABS_API_KEY is read from the project .env file; ensure the voice is permitted by your plan."
         )
-    typer.echo("Run ./show doctor next. Setup makes no cloud requests or model downloads.")
+    console.print()
+    console.print("Next: ./show doctor", style="bold cyan")
+    console.print("Setup makes no cloud requests or model downloads.")
     return True
 
 

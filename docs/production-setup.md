@@ -6,6 +6,11 @@ no saved provider preferences exist. Unattended runs fail with setup instruction
 instead of prompting or silently selecting a billable service. Fixture runs skip
 setup. `./show providers` displays hardware and supported options without changes.
 
+Setup groups machine details, provider choices, and billing notes into separate
+sections. Menus accept either an option number or its name; Enter accepts the
+marked default. Colors follow terminal capabilities and `NO_COLOR`. Redirected
+output remains readable without ANSI color codes.
+
 ## Supported combinations
 
 | Stage | Local | Cloud |
