@@ -38,7 +38,9 @@ from morning_radio.settings import load_app_settings, load_production_settings, 
 def fixture_worker(output: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="morning-benchmark-") as directory:
         root = Path(directory)
-        shutil.copytree(repo_root() / "config", root / "config")
+        shutil.copytree(
+            repo_root() / "config", root / "config", ignore=shutil.ignore_patterns("*.local.yaml")
+        )
         save_profile(default_profile(), root)
         # Explicit mode keeps operator history/assets and network out of fixtures.
         os.environ.update(

@@ -59,7 +59,7 @@ def test_recommendations(memory, disk, expected):
 
 def test_local_setup_preserves_base_files(root):
     before = {p: p.read_bytes() for p in (root / "config").glob("*.yaml")}
-    result = CliRunner().invoke(app, ["setup"], input="local\ny\n\n\ny\n")
+    result = CliRunner().invoke(app, ["setup"], input="local\nkokoro\n\n\ny\n")
     assert result.exit_code == 0, result.output
     assert load_app_settings(root).llm.model == "qwen3:4b"
     assert load_app_settings(root).llm.thinking is False
@@ -70,14 +70,14 @@ def test_local_setup_preserves_base_files(root):
 
 
 def test_cancel_writes_nothing(root):
-    result = CliRunner().invoke(app, ["setup"], input="local\ny\n\n\nn\n")
+    result = CliRunner().invoke(app, ["setup"], input="local\nkokoro\n\n\nn\n")
     assert result.exit_code == 0
     assert not (root / "config/providers.local.yaml").exists()
 
 
 def test_cloud_setup_hidden_keys_and_script_only(root):
     result = CliRunner().invoke(
-        app, ["setup"], input="cloud\nn\n\n\ny\ntest-secret\ntest-secret\ny\n"
+        app, ["setup"], input="cloud\nopenai\nnone\n\ny\ntest-secret\ntest-secret\ny\n"
     )
     assert result.exit_code == 0, result.output
     assert "test-secret" not in result.output
@@ -95,7 +95,9 @@ def test_mixed_setup(root):
 
 
 def test_cloud_speech_and_keep(root):
-    result = CliRunner().invoke(app, ["setup"], input="cloud\ny\n\n\nTestVoice123\nn\nn\ny\n")
+    result = CliRunner().invoke(
+        app, ["setup"], input="cloud\nopenai\nelevenlabs\n\nTestVoice123\nn\nn\ny\n"
+    )
     assert result.exit_code == 0, result.output
     assert load_production_settings(root).tts.voice == "TestVoice123"
     before = (root / "config/providers.local.yaml").read_bytes()
@@ -163,12 +165,12 @@ def test_catalog_layout_wraps_with_and_without_color(root, monkeypatch, width, c
 
 
 def test_numbered_menu_retries_then_cancels_without_changes(root):
-    result = CliRunner().invoke(app, ["setup"], input="0\n1\ny\n1\n1\nn\n")
+    result = CliRunner().invoke(app, ["setup"], input="0\n1\n1\n1\n1\nn\n")
     assert result.exit_code == 0, result.output
     assert "Choose one of the listed options" in result.output
     assert "1. local (default)" in result.output
     assert "1 / Production" in result.output
-    assert "subscription or API usage" in " ".join(result.output.split())
+    assert "choose local, cloud, or no audio next" in " ".join(result.output.split())
     assert "API billing applies" not in result.output
     assert "2 / Review" in result.output
     assert "Setup cancelled" in result.output
@@ -177,7 +179,7 @@ def test_numbered_menu_retries_then_cancels_without_changes(root):
 
 
 def test_numbered_menu_saves_same_preferences_as_names(root):
-    result = CliRunner().invoke(app, ["setup"], input="1\ny\n1\n1\ny\n")
+    result = CliRunner().invoke(app, ["setup"], input="1\n1\n1\n1\ny\n")
     assert result.exit_code == 0, result.output
     assert "3 / Ready" in result.output
     assert "Next: ./show doctor" in result.output
@@ -337,7 +339,7 @@ def test_hardware_linux_and_unverified_gpu(tmp_path, monkeypatch, capsys):
 def test_cancel_after_entering_key_preserves_secrets(root):
     (root / ".env").write_text("# retain\nOPENAI_API_KEY='previous'\n")
     result = CliRunner().invoke(
-        app, ["setup"], input="cloud\nn\n\n\ny\nnew-secret\nnew-secret\nn\n"
+        app, ["setup"], input="cloud\nopenai\nnone\n\ny\nnew-secret\nnew-secret\nn\n"
     )
     assert result.exit_code == 0
     assert "new-secret" not in result.output

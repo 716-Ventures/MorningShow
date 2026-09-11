@@ -18,8 +18,11 @@ output remains readable without ANSI color codes.
 | Research, clustering, writing, verification, feedback | Ollama: Qwen3 4B or 8B | OpenAI API: GPT-4.1 mini or GPT-4.1; ChatGPT via Codex: discovered models |
 | Speech | Kokoro: Bella and six other built-in voices | ElevenLabs: an account-accessible Voice ID |
 
-Choose local, cloud, or mixed. Mixed selects each stage independently, for example
-OpenAI scripts with local Bella speech. Audio can also be disabled entirely.
+Choose local or cloud scripts, or mixed to see all script providers together.
+Every mode then asks separately for audio output: local Kokoro, cloud ElevenLabs,
+or `none`. Cloud scripts can use local Bella speech without selecting mixed.
+Choosing `none` disables all speech and MP3 generation; it does not select local
+audio. The review explicitly lists whether an MP3 episode will be produced.
 Existing users can choose `keep` to adopt current settings without changing models.
 `./show configure` still edits editorial interests, not provider preferences.
 
@@ -33,9 +36,8 @@ not the OpenAI API catalog. Actual access remains subject to account restriction
 
 1. Install a Codex CLI with app-server support on PATH. The integration was checked
    against CLI 0.146.0 on macOS. The subprocess transport targets macOS/Linux.
-2. Run `./show setup`, choose `mixed`, then `codex` for scripts and `kokoro` for
-   local speech, or `none` for script-only production. Cloud mode also offers Codex
-   scripts with ElevenLabs speech.
+2. Run `./show setup`, choose `cloud`, then `codex` for scripts and `kokoro` for
+   local speech, `elevenlabs` for cloud speech, or `none` for scripts without an MP3.
 3. Accept browser sign-in when offered, finish authorization in your browser, and
    return to setup. Select a listed model and confirm the preferences.
 4. Run `./show doctor`, then `./show morning`.

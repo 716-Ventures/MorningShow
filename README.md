@@ -45,9 +45,10 @@ unchanged.
 
 ### ChatGPT Subscription via Codex
 
-With the Codex CLI installed on PATH, run `./show setup`, choose `mixed`, select
+With the Codex CLI installed on PATH, run `./show setup`, choose `cloud`, select
 `codex` for scripts, and choose `kokoro` for local speech (or `none` for scripts
-only). Setup offers browser sign-in and lists models reported by Codex. This uses
+only, with no MP3). Audio is always a separate choice, even with cloud scripts.
+Setup offers browser sign-in and lists models reported by Codex. This uses
 your eligible ChatGPT plan's Codex allowance, not `OPENAI_API_KEY`. Speech remains
 separate, and subscription limits or account credit policies still apply.
 

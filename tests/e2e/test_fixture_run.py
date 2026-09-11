@@ -19,7 +19,9 @@ FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "morning-run"
 
 def isolated_root(tmp_path: Path) -> Path:
     root = tmp_path / "morning-radio-root"
-    shutil.copytree(REPO_ROOT / "config", root / "config")
+    shutil.copytree(
+        REPO_ROOT / "config", root / "config", ignore=shutil.ignore_patterns("*.local.yaml")
+    )
     (root / "assets").mkdir()
     save_profile(default_profile(), root)
     return root

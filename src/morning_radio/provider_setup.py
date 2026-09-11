@@ -44,16 +44,16 @@ def _details(rows: list[tuple[str, str]]) -> None:
 
 
 CHOICE_DESCRIPTIONS = {
-    "local": "Scripts and speech on this machine",
-    "cloud": "Hosted scripts and speech; subscription or API usage",
+    "local": "Local scripts; choose audio separately next",
+    "cloud": "Cloud scripts; choose local, cloud, or no audio next",
     "mixed": "Choose script and speech providers separately",
     "keep": "Keep the currently configured providers",
     "ollama": "Local script generation",
     "openai": "Cloud scripts via OpenAI API; separate API billing",
     "codex": "ChatGPT subscription via Codex; subscription limits apply",
-    "kokoro": "Local speech",
-    "elevenlabs": "Cloud speech; credits and voice access required",
-    "none": "Script only; no audio",
+    "kokoro": "Generate an MP3 with local speech on this machine",
+    "elevenlabs": "Generate an MP3 with cloud speech; credits and voice access required",
+    "none": "Scripts only; no speech or MP3 will be generated",
     "af_bella": "Bella",
     "af_heart": "Heart",
     "af_nicole": "Nicole",
@@ -195,12 +195,17 @@ def run_setup(root: Path) -> bool:
         speech_provider = "kokoro" if mode == "local" else "elevenlabs"
         if mode == "mixed":
             text_provider = _choice("Scripts", ("ollama", "openai", "codex"), "ollama")
-            speech_provider = _choice("Speech", ("kokoro", "elevenlabs", "none"), "kokoro")
-        else:
-            if not typer.confirm("Generate audio as well as scripts?", default=True):
-                speech_provider = "none"
-            if mode == "cloud":
-                text_provider = _choice("Scripts", ("openai", "codex"), "openai")
+        elif mode == "cloud":
+            text_provider = _choice("Scripts", ("openai", "codex"), "openai")
+        speech_provider = _choice(
+            "Audio output (independent of the script provider)",
+            ("kokoro", "elevenlabs", "none"),
+            "elevenlabs" if mode == "cloud" else "kokoro",
+        )
+        if speech_provider == "none":
+            console.print(
+                "Audio is off: no speech, music mix, or MP3 will be produced.", style="yellow"
+            )
         if text_provider == "ollama":
             recommended = recommend_model(hardware)
             if recommended is None and not typer.confirm(
@@ -294,6 +299,12 @@ def run_setup(root: Path) -> bool:
                 preferences.tts.engine + " / " + str(preferences.tts.voice)
                 if preferences.generate_audio
                 else "disabled",
+            ),
+            (
+                "Output",
+                "Script, sources, and MP3 episode"
+                if preferences.generate_audio
+                else "Script and sources only; NO MP3",
             ),
         ]
     )

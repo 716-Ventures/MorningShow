@@ -15,7 +15,9 @@ from morning_radio.settings import (
 
 def copy_config(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
-    shutil.copytree(root / "config", tmp_path / "config")
+    shutil.copytree(
+        root / "config", tmp_path / "config", ignore=shutil.ignore_patterns("*.local.yaml")
+    )
 
 
 def test_valid_config_loads(tmp_path: Path) -> None:

@@ -17,7 +17,7 @@ from morning_radio.dependencies import check_llm
 from morning_radio.llm import codex
 from morning_radio.llm.client import LLMConnectionError, LLMInvalidResponseError, build_llm_client
 from morning_radio.llm.codex_rpc import MAX_MESSAGE_BYTES, CodexRPC
-from morning_radio.settings import LLMSettings, load_app_settings
+from morning_radio.settings import LLMSettings, load_app_settings, load_production_settings
 
 
 class FakeServer(CodexRPC):
@@ -437,6 +437,28 @@ def test_setup_selects_subscription_without_api_key(root, server):
     assert load_app_settings(root).llm.provider == "codex"
     assert load_app_settings(root).llm.model == "test-codex"
     assert not (root / ".env").exists()
+
+
+@pytest.mark.parametrize("audio", ["kokoro", "elevenlabs", "none"])
+def test_cloud_scripts_offer_independent_audio_output(root, server, audio):
+    tail = {"kokoro": "af_bella\n", "elevenlabs": "TestVoice123\nn\n", "none": ""}[audio]
+    result = CliRunner().invoke(app, ["setup"], input=f"cloud\ncodex\n{audio}\n1\n{tail}y\n")
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Audio output (independent of the script provider)" in output
+    assert "Generate audio as well as scripts?" not in output
+    assert load_app_settings(root).llm.provider == "codex"
+    production = load_production_settings(root)
+    assert production.generate_audio is (audio != "none")
+    if audio == "none":
+        assert "Script and sources only; NO MP3" in output
+        assert "no speech, music mix, or MP3" in output
+    else:
+        assert production.tts.engine == audio
+        assert "Script, sources, and MP3 episode" in output
+        if audio == "kokoro":
+            assert production.tts.voice == "af_bella"
+            assert "ELEVENLABS_API_KEY" not in output
 
 
 @pytest.mark.parametrize("connected", [True, False])

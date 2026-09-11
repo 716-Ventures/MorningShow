@@ -32,6 +32,9 @@ def test_isolated_fixture_worker_records_real_stage_metrics(monkeypatch, tmp_pat
 
 @pytest.mark.parametrize("fails", [True, False])
 def test_live_driver_reports_measurements_and_closes_client(monkeypatch, tmp_path: Path, fails):
+    settings = benchmark.load_app_settings()
+    settings.llm.provider = "ollama"
+    monkeypatch.setattr(benchmark, "load_app_settings", lambda: settings)
     for key in ("MORNING_RADIO_FIXTURE_RUN", "MORNING_RADIO_FAKE_LLM", "MORNING_RADIO_FAKE_TTS"):
         monkeypatch.delenv(key, raising=False)
 
