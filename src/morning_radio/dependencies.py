@@ -70,6 +70,32 @@ def check_ffmpeg() -> list[DependencyCheck]:
 
 
 def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
+    if app_settings.llm.provider == "codex":
+        from morning_radio.llm.codex import available_models, subscription_status
+        from morning_radio.llm.codex_rpc import CodexRPC
+        from morning_radio.settings import repo_root
+
+        try:
+            with CodexRPC(repo_root()) as server:
+                detail = subscription_status(server)
+                found = app_settings.llm.model in available_models(server)
+            return [
+                DependencyCheck(
+                    "ChatGPT via Codex",
+                    found,
+                    detail,
+                    "Run ./show setup if the selected model is unavailable.",
+                )
+            ]
+        except (RuntimeError, OSError) as exc:
+            return [
+                DependencyCheck(
+                    "ChatGPT via Codex",
+                    False,
+                    str(exc),
+                    "Run ./show codex-login, then ./show codex-status.",
+                )
+            ]
     if app_settings.llm.provider == "openai":
         key = read_credential("OPENAI_API_KEY")
         return [

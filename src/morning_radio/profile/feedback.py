@@ -15,6 +15,7 @@ from morning_radio.llm.client import (
     allows_fixture_fallback,
     build_llm_client,
 )
+from morning_radio.llm.codex import CodexClient
 from morning_radio.llm.openai import OpenAIClient
 from morning_radio.llm.prompts import SCORING_SYSTEM
 from morning_radio.llm.schemas import FeedbackMemoryResponse
@@ -88,7 +89,7 @@ def update_editorial_memory(
             if not allows_fixture_fallback(client):
                 raise
         finally:
-            if llm is None and isinstance(client, (OllamaClient, OpenAIClient)):
+            if llm is None and isinstance(client, (OllamaClient, OpenAIClient, CodexClient)):
                 client.close()
     return normalize_memory(previous.rstrip() + "\n" + fallback_memory_addition(answers))
 

@@ -100,5 +100,5 @@ def test_verifier_timeout_reports_service_failure_not_unsupported_claims(monkeyp
     with pytest.raises(MorningPipelineError, match="timed out") as caught:
         run_morning(date(2026, 8, 15), minutes=10, no_assets=True, root=root)
     assert "unsupported claims were not established" in caught.value.action
-    assert "Ollama" in caught.value.action
+    assert "configured script provider" in caught.value.action
     assert not list(root.glob("runs/**/episode.mp3"))

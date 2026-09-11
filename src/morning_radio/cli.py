@@ -30,12 +30,62 @@ app = typer.Typer(no_args_is_help=True, help="Generate a local personal morning 
 console = Console()
 
 
+@app.command("codex-login")
+def codex_login() -> None:
+    """Sign in with ChatGPT for MorningShow's isolated Codex provider."""
+    from morning_radio.llm.codex import require_chatgpt, sign_in
+    from morning_radio.llm.codex_rpc import CodexRPC
+
+    try:
+        with CodexRPC(repo_root()) as server:
+            console.print("Opening ChatGPT sign-in in your browser. Waiting up to five minutes.")
+            sign_in(server)
+            require_chatgpt(server)
+        console.print(
+            "ChatGPT connected for MorningShow. Run ./show setup to select it.", style="green"
+        )
+    except (RuntimeError, OSError) as exc:
+        console.print(f"Codex sign-in failed: {exc}", style="red", markup=False)
+        raise typer.Exit(1) from exc
+
+
+@app.command("codex-status")
+def codex_status() -> None:
+    """Check subscription sign-in, usage limits and model catalog without generation."""
+    from morning_radio.llm.codex import available_models, subscription_status
+    from morning_radio.llm.codex_rpc import CodexRPC
+
+    try:
+        with CodexRPC(repo_root()) as server:
+            console.print(subscription_status(server), markup=False)
+            console.print("Available models: " + ", ".join(available_models(server)), markup=False)
+    except (RuntimeError, OSError) as exc:
+        console.print(f"Codex status failed: {exc}", style="red", markup=False)
+        raise typer.Exit(1) from exc
+
+
+@app.command("codex-logout")
+def codex_logout() -> None:
+    """Disconnect only MorningShow's isolated ChatGPT sign-in."""
+    from morning_radio.llm.codex_rpc import CodexRPC
+
+    try:
+        with CodexRPC(repo_root()) as server:
+            server.request("account/logout", {})
+        console.print(
+            "MorningShow disconnected. Your other Codex sign-ins are unchanged.", style="green"
+        )
+    except (RuntimeError, OSError) as exc:
+        console.print(f"Codex logout failed: {exc}", style="red", markup=False)
+        raise typer.Exit(1) from exc
+
+
 @app.command()
 def setup() -> None:
     """Select local, cloud or mixed production providers for this machine."""
     try:
         run_setup(repo_root())
-    except (ValueError, ConfigError, OSError) as exc:
+    except (ValueError, RuntimeError, OSError) as exc:
         console.print(f"Setup failed: {exc}", markup=False)
         raise typer.Exit(1) from exc
 

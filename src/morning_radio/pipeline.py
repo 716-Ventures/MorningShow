@@ -23,6 +23,7 @@ from morning_radio.audio.production import (
 )
 from morning_radio.dependencies import morning_preflight
 from morning_radio.llm.client import LLMClient, OllamaClient, build_llm_client
+from morning_radio.llm.codex import CodexClient
 from morning_radio.llm.openai import OpenAIClient
 from morning_radio.models import (
     CandidateStory,
@@ -99,14 +100,14 @@ def run_morning(
             run_id=context.record.run_id,
             failed_stage=context.record.failed_stage or context.record.status.value,
             action=(
-                "Check Ollama availability and logs/verification-fallback.json, then retry. "
+                "Check the configured script provider and logs/verification-fallback.json, then retry. "
                 "The verifier did not complete; unsupported claims were not established."
                 if isinstance(exc, VerificationUnavailableError)
                 else stage_action(context.record.failed_stage or context.record.status.value)
             ),
         ) from exc
     finally:
-        if isinstance(llm, (OllamaClient, OpenAIClient)):
+        if isinstance(llm, (OllamaClient, OpenAIClient, CodexClient)):
             llm.close()
 
 

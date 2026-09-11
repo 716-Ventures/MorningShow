@@ -77,7 +77,7 @@ def test_cancel_writes_nothing(root):
 
 def test_cloud_setup_hidden_keys_and_script_only(root):
     result = CliRunner().invoke(
-        app, ["setup"], input="cloud\nn\n\ny\ntest-secret\ntest-secret\ny\n"
+        app, ["setup"], input="cloud\nn\n\n\ny\ntest-secret\ntest-secret\ny\n"
     )
     assert result.exit_code == 0, result.output
     assert "test-secret" not in result.output
@@ -95,7 +95,7 @@ def test_mixed_setup(root):
 
 
 def test_cloud_speech_and_keep(root):
-    result = CliRunner().invoke(app, ["setup"], input="cloud\ny\n\nTestVoice123\nn\nn\ny\n")
+    result = CliRunner().invoke(app, ["setup"], input="cloud\ny\n\n\nTestVoice123\nn\nn\ny\n")
     assert result.exit_code == 0, result.output
     assert load_production_settings(root).tts.voice == "TestVoice123"
     before = (root / "config/providers.local.yaml").read_bytes()
@@ -334,7 +334,9 @@ def test_hardware_linux_and_unverified_gpu(tmp_path, monkeypatch, capsys):
 
 def test_cancel_after_entering_key_preserves_secrets(root):
     (root / ".env").write_text("# retain\nOPENAI_API_KEY='previous'\n")
-    result = CliRunner().invoke(app, ["setup"], input="cloud\nn\n\ny\nnew-secret\nnew-secret\nn\n")
+    result = CliRunner().invoke(
+        app, ["setup"], input="cloud\nn\n\n\ny\nnew-secret\nnew-secret\nn\n"
+    )
     assert result.exit_code == 0
     assert "new-secret" not in result.output
     assert dotenv_values(root / ".env")["OPENAI_API_KEY"] == "previous"

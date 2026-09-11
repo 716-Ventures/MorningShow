@@ -27,7 +27,7 @@ class Configuration(BaseModel):
 
 
 class LLMSettings(Configuration):
-    provider: Literal["ollama", "openai"] = "ollama"
+    provider: Literal["ollama", "openai", "codex"] = "ollama"
     base_url: HttpUrl
     model: str
     timeout_seconds: int = Field(gt=0)

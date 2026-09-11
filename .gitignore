@@ -10,6 +10,7 @@ venv/
 config/providers.local.yaml
 .DS_Store
 data/app.db
+data/codex/
 runs/
 *.wav
 *.mp3

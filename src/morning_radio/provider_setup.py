@@ -50,6 +50,7 @@ CHOICE_DESCRIPTIONS = {
     "keep": "Keep the currently configured providers",
     "ollama": "Local script generation",
     "openai": "Cloud script generation",
+    "codex": "ChatGPT subscription via Codex; subscription limits apply",
     "kokoro": "Local speech",
     "elevenlabs": "Cloud speech; credits and voice access required",
     "none": "Script only; no audio",
@@ -137,6 +138,7 @@ def show_providers(root: Path) -> Hardware:
         [
             ("Local scripts", "Ollama / qwen3:4b, qwen3:8b"),
             ("Cloud scripts", "OpenAI / gpt-4.1-mini, gpt-4.1"),
+            ("Subscription", "ChatGPT via Codex / models discovered after sign-in"),
             ("Local speech", "Kokoro"),
             ("Cloud speech", "ElevenLabs"),
             ("Without speech", "Script-only production"),
@@ -147,6 +149,10 @@ def show_providers(root: Path) -> Hardware:
         [
             ("Local", "No API bill. News and first model downloads still need internet."),
             ("OpenAI", "API billing is separate from ChatGPT."),
+            (
+                "Codex",
+                "Uses your eligible ChatGPT plan's Codex allowance. Not unlimited; speech is separate.",
+            ),
             (
                 "ElevenLabs",
                 "Credits and voice access required. Voice Library API voices require a paid plan; a key alone does not grant access.",
@@ -188,11 +194,13 @@ def run_setup(root: Path) -> bool:
         text_provider = "ollama" if mode == "local" else "openai"
         speech_provider = "kokoro" if mode == "local" else "elevenlabs"
         if mode == "mixed":
-            text_provider = _choice("Scripts", ("ollama", "openai"), "ollama")
+            text_provider = _choice("Scripts", ("ollama", "openai", "codex"), "ollama")
             speech_provider = _choice("Speech", ("kokoro", "elevenlabs", "none"), "kokoro")
         else:
             if not typer.confirm("Generate audio as well as scripts?", default=True):
                 speech_provider = "none"
+            if mode == "cloud":
+                text_provider = _choice("Scripts", ("openai", "codex"), "openai")
         if text_provider == "ollama":
             recommended = recommend_model(hardware)
             if recommended is None and not typer.confirm(
@@ -210,6 +218,25 @@ def run_setup(root: Path) -> bool:
                     "context_tokens": 8192,
                 }
             )
+        elif text_provider == "codex":
+            from morning_radio.llm.codex import available_models, require_chatgpt, sign_in
+            from morning_radio.llm.codex_rpc import CodexRPC
+
+            with CodexRPC(root) as server:
+                try:
+                    require_chatgpt(server)
+                except RuntimeError:
+                    console.print(
+                        "Browser sign-in is stored separately from preferences and remains connected if setup is later cancelled.",
+                        style="yellow",
+                    )
+                    if not typer.confirm("Sign in with ChatGPT now?", default=True):
+                        return False
+                    console.print("Opening your browser. Waiting up to five minutes.")
+                    sign_in(server)
+                models = tuple(available_models(server))
+                model = _choice("Codex model", models, models[0])
+            app.llm = app.llm.model_copy(update={"provider": "codex", "model": model})
         else:
             model = _choice("OpenAI model", ("gpt-4.1-mini", "gpt-4.1"), "gpt-4.1-mini")
             app.llm = app.llm.model_copy(
@@ -307,8 +334,10 @@ def run_setup(root: Path) -> bool:
     if preferences.llm.provider == "ollama":
         console.print("Install/start Ollama, then run:")
         console.print(f"  ollama pull {preferences.llm.model}", style="cyan", markup=False)
-    else:
+    elif preferences.llm.provider == "openai":
         console.print("OPENAI_API_KEY is read from the project .env file.")
+    else:
+        console.print("ChatGPT subscription selected. Check allowance with ./show codex-status.")
     if preferences.generate_audio and preferences.tts.engine == "kokoro":
         console.print("Install the local speech runtime:")
         console.print("  uv sync --dev --extra tts --python 3.12", style="cyan")
@@ -318,7 +347,7 @@ def run_setup(root: Path) -> bool:
         )
     console.print()
     console.print("Next: ./show doctor", style="bold cyan")
-    console.print("Setup makes no cloud requests or model downloads.")
+    console.print("Setup makes no generation requests or model downloads.")
     return True
 
 
