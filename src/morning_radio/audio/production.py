@@ -16,6 +16,7 @@ from morning_radio.audio.tts import (
     prepare_tts_text,
     speech_hash,
 )
+from morning_radio.audio.vercel import VercelTTS
 from morning_radio.models import AudioMetadata, EditorialProfile
 from morning_radio.settings import ProductionSettings
 from morning_radio.showgen.script import spoken_blocks
@@ -87,7 +88,7 @@ def synthesize_script(
     try:
         return _synthesize_script(script, production, run_dir, profile, owned)
     finally:
-        if isinstance(owned, ElevenLabsTTS):
+        if isinstance(owned, (ElevenLabsTTS, VercelTTS)):
             owned.close()
 
 
@@ -140,6 +141,9 @@ def _synthesize_script(
 def resolve_voices(
     production: ProductionSettings, profile: EditorialProfile | None = None
 ) -> tuple[str, str]:
+    if production.tts.engine == "vercel":
+        primary = production.tts.voice or "alloy"
+        return primary, production.tts.secondary_voice or primary
     if production.tts.engine == "elevenlabs":
         primary = production.tts.voice
         if not primary:

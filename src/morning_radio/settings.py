@@ -27,12 +27,23 @@ class Configuration(BaseModel):
 
 
 class LLMSettings(Configuration):
-    provider: Literal["ollama", "openai", "codex"] = "ollama"
+    provider: Literal["ollama", "openai", "codex", "vercel"] = "ollama"
     base_url: HttpUrl
     model: str
     timeout_seconds: int = Field(gt=0)
     thinking: bool | None = None
     context_tokens: int = Field(default=8192, ge=4096, le=32768)
+
+    @model_validator(mode="after")
+    def valid_gateway_model(self) -> LLMSettings:
+        if self.provider == "vercel":
+            parts = self.model.split("/")
+            if len(parts) != 2 or any(
+                not part or not all(c.isascii() and (c.isalnum() or c in "-_.:") for c in part)
+                for part in parts
+            ):
+                raise ValueError("Vercel requires a model ID in provider/model format")
+        return self
 
 
 class NewsSettings(Configuration):
@@ -72,8 +83,16 @@ class ElevenLabsSettings(Configuration):
     use_speaker_boost: bool = True
 
 
+class VercelSpeechSettings(Configuration):
+    model_id: Literal["openai/tts-1", "openai/tts-1-hd"] = "openai/tts-1"
+    timeout_seconds: int = Field(default=120, ge=1, le=600)
+
+
+VERCEL_VOICES = ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+
+
 class TTSSettings(Configuration):
-    engine: Literal["kokoro", "tone", "elevenlabs"]
+    engine: Literal["kokoro", "tone", "elevenlabs", "vercel"]
     voice: str | None = None
     secondary_voice: str | None = None
     speed: float = Field(gt=0, le=3)
@@ -82,9 +101,17 @@ class TTSSettings(Configuration):
     max_chunk_words: int = Field(default=55, ge=15, le=150)
     pronunciation_overrides: dict[str, str] = Field(default_factory=dict)
     elevenlabs: ElevenLabsSettings = Field(default_factory=ElevenLabsSettings)
+    vercel: VercelSpeechSettings = Field(default_factory=VercelSpeechSettings)
 
     @model_validator(mode="after")
     def valid_provider_settings(self) -> TTSSettings:
+        if self.engine == "vercel":
+            if self.voice not in VERCEL_VOICES or (
+                self.secondary_voice is not None and self.secondary_voice not in VERCEL_VOICES
+            ):
+                raise ValueError("Choose a supported Vercel speech voice")
+            if self.speed < 0.25:
+                raise ValueError("Vercel speech speed must be at least 0.25")
         if self.engine == "elevenlabs":
             if not self.voice:
                 raise ValueError("ElevenLabs requires tts.voice to contain a Voice ID")

@@ -224,6 +224,12 @@ def build_tts_adapter(engine: str, *, settings: TTSSettings | None = None) -> TT
         if settings is None:
             raise TTSError("ElevenLabs requires TTS settings and a Voice ID.")
         return ElevenLabsTTS(settings)
+    if engine == "vercel":
+        from morning_radio.audio.vercel import VercelTTS
+
+        if settings is None:
+            raise TTSError("Vercel speech requires TTS settings and a voice.")
+        return VercelTTS(settings)
     raise TTSError(f"Unsupported TTS engine: {engine}")
 
 

@@ -228,6 +228,10 @@ def build_llm_client(settings: LLMSettings, run_dir: Path) -> LLMClient:
         from morning_radio.llm.openai import OpenAIClient
 
         return OpenAIClient(settings, run_dir)
+    if settings.provider == "vercel":
+        from morning_radio.llm.vercel import VercelClient
+
+        return VercelClient(settings, run_dir)
     if settings.provider == "codex":
         from morning_radio.llm.codex import CodexClient
 

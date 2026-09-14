@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import TypeVar
+from typing import ClassVar, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -19,14 +19,23 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class OpenAIClient:
+    provider = "openai"
+    label = "OpenAI"
+    credential = "OPENAI_API_KEY"
+    endpoint = "https://api.openai.com/v1/"
+    completion_options: ClassVar[dict[str, object]] = {
+        "max_completion_tokens": 12000,
+        "store": False,
+    }
+
     def __init__(self, settings: LLMSettings, run_dir: Path):
-        key = read_credential("OPENAI_API_KEY")
+        key = read_credential(self.credential)
         if not key:
-            raise LLMConnectionError("Set OPENAI_API_KEY in the project .env file.")
+            raise LLMConnectionError(f"Set {self.credential} in the project .env file.")
         self.model = settings.model
         self.run_dir = run_dir
         self._client = httpx.Client(
-            base_url="https://api.openai.com/v1/",
+            base_url=self.endpoint,
             headers={"Authorization": f"Bearer {key}"},
             timeout=settings.timeout_seconds,
             trust_env=False,
@@ -45,15 +54,14 @@ class OpenAIClient:
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
                 ],
-                "max_completion_tokens": 12000,
-                "store": False,
+                **self.completion_options,
             }
             if structured:
                 payload["response_format"] = {"type": "json_object"}
             response = self._client.post("chat/completions", json=payload)
             if not response.is_success:
                 raise LLMConnectionError(
-                    f"OpenAI returned HTTP {response.status_code}. Check API credentials, "
+                    f"{self.label} returned HTTP {response.status_code}. Check API credentials, "
                     "model access, billing and rate limits. No request was retried."
                 )
             choice = response.json()["choices"][0]
@@ -64,14 +72,14 @@ class OpenAIClient:
                 or not content.strip()
             ):
                 raise LLMInvalidResponseError(
-                    "OpenAI returned incomplete, refused or empty output."
+                    f"{self.label} returned incomplete, refused or empty output."
                 )
             return content
         except httpx.HTTPError:
-            error = "OpenAI network request failed; no automatic retry."
+            error = f"{self.label} network request failed; no automatic retry."
             raise LLMConnectionError(error) from None
-        except (KeyError, IndexError, TypeError, ValueError):
-            error = "OpenAI returned malformed response data."
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            error = f"{self.label} returned malformed response data."
             raise LLMInvalidResponseError(error) from None
         except (LLMConnectionError, LLMInvalidResponseError) as exc:
             error = str(exc)
@@ -82,7 +90,7 @@ class OpenAIClient:
                 {
                     "stage": stage,
                     "model": self.model,
-                    "provider": "openai",
+                    "provider": self.provider,
                     "prompt_type": kind,
                     "input_character_count": len(prompt),
                     "elapsed_ms": round((time.monotonic() - started) * 1000),
@@ -121,5 +129,5 @@ class OpenAIClient:
                     + "\nPrior output did not match the schema. Include every required field with the correct type."
                 )
         raise LLMInvalidResponseError(
-            "OpenAI output failed schema validation after three attempts."
+            f"{self.label} output failed schema validation after three attempts."
         )

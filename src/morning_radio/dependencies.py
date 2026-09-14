@@ -96,16 +96,19 @@ def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
                     "Run ./show codex-login, then ./show codex-status.",
                 )
             ]
-    if app_settings.llm.provider == "openai":
-        key = read_credential("OPENAI_API_KEY")
+    if app_settings.llm.provider in {"openai", "vercel"}:
+        gateway = app_settings.llm.provider == "vercel"
+        credential = "AI_GATEWAY_API_KEY" if gateway else "OPENAI_API_KEY"
+        label = "Vercel AI Gateway" if gateway else "OpenAI"
+        key = read_credential(credential)
         return [
             DependencyCheck(
-                "OpenAI credential configured",
+                f"{label} credential configured",
                 bool(key),
                 "Credential present; billing and model access are not verified."
                 if key
                 else "Missing key",
-                "Set OPENAI_API_KEY in .env. Generation requires API billing; ChatGPT plans do not include it.",
+                f"Set {credential} in .env. Generation requires provider credits or billing; ChatGPT plans do not include it.",
             )
         ]
     try:
@@ -140,6 +143,18 @@ def check_llm(app_settings: AppSettings) -> list[DependencyCheck]:
 
 
 def check_tts(production: ProductionSettings) -> list[DependencyCheck]:
+    if production.tts.engine == "vercel":
+        key = read_credential("AI_GATEWAY_API_KEY")
+        return [
+            DependencyCheck(
+                "Vercel speech credential configured",
+                bool(key),
+                "Credential present; speech beta access, credits, and voice generation are not verified."
+                if key
+                else "Missing key",
+                "Set AI_GATEWAY_API_KEY in .env. Speech beta access is required; ./show voice-preview generates billable audio.",
+            )
+        ]
     if production.tts.engine == "elevenlabs":
         adapter = None
         try:

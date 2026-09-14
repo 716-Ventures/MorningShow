@@ -33,7 +33,7 @@ def save_credentials(root: Path, values: dict[str, str]) -> None:
     """Preserve existing dotenv entries; atomically replace with owner-only permissions."""
     if not values:
         return
-    if set(values) - {"OPENAI_API_KEY", "ELEVENLABS_API_KEY"}:
+    if set(values) - {"OPENAI_API_KEY", "ELEVENLABS_API_KEY", "AI_GATEWAY_API_KEY"}:
         raise ValueError("Unsupported credential name")
     path = root / ".env"
     temporary = None

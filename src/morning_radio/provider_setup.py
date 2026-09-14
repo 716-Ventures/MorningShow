@@ -20,6 +20,7 @@ from rich.text import Text
 from morning_radio.artifacts.io import atomic_write_text
 from morning_radio.credentials import save_credentials
 from morning_radio.settings import (
+    VERCEL_VOICES,
     ProviderPreferences,
     load_app_settings,
     load_production_settings,
@@ -51,6 +52,7 @@ CHOICE_DESCRIPTIONS = {
     "ollama": "Local script generation",
     "openai": "Cloud scripts via OpenAI API; separate API billing",
     "codex": "ChatGPT subscription via Codex; subscription limits apply",
+    "vercel": "Vercel AI Gateway; gateway credits and model access required",
     "kokoro": "Generate an MP3 with local speech on this machine",
     "elevenlabs": "Generate an MP3 with cloud speech; credits and voice access required",
     "none": "Scripts only; no speech or MP3 will be generated",
@@ -139,6 +141,7 @@ def show_providers(root: Path) -> Hardware:
             ("Local scripts", "Ollama / qwen3:4b, qwen3:8b"),
             ("Cloud scripts", "OpenAI / gpt-4.1-mini, gpt-4.1"),
             ("Subscription", "ChatGPT via Codex / models discovered after sign-in"),
+            ("AI Gateway", "Vercel / text models and OpenAI speech (beta)"),
             ("Local speech", "Kokoro"),
             ("Cloud speech", "ElevenLabs"),
             ("Without speech", "Script-only production"),
@@ -149,6 +152,10 @@ def show_providers(root: Path) -> Hardware:
         [
             ("Local", "No API bill. News and first model downloads still need internet."),
             ("OpenAI", "API billing is separate from ChatGPT."),
+            (
+                "Vercel",
+                "Gateway credits required. Speech is beta and may not be enabled for your team.",
+            ),
             (
                 "Codex",
                 "Uses your eligible ChatGPT plan's Codex allowance. Not unlimited; speech is separate.",
@@ -194,12 +201,12 @@ def run_setup(root: Path) -> bool:
         text_provider = "ollama" if mode == "local" else "openai"
         speech_provider = "kokoro" if mode == "local" else "elevenlabs"
         if mode == "mixed":
-            text_provider = _choice("Scripts", ("ollama", "openai", "codex"), "ollama")
+            text_provider = _choice("Scripts", ("ollama", "openai", "codex", "vercel"), "ollama")
         elif mode == "cloud":
-            text_provider = _choice("Scripts", ("openai", "codex"), "openai")
+            text_provider = _choice("Scripts", ("openai", "codex", "vercel"), "openai")
         speech_provider = _choice(
             "Audio output (independent of the script provider)",
-            ("kokoro", "elevenlabs", "none"),
+            ("kokoro", "elevenlabs", "none", "vercel"),
             "elevenlabs" if mode == "cloud" else "kokoro",
         )
         if speech_provider == "none":
@@ -242,6 +249,26 @@ def run_setup(root: Path) -> bool:
                 models = tuple(available_models(server))
                 model = _choice("Codex model", models, models[0])
             app.llm = app.llm.model_copy(update={"provider": "codex", "model": model})
+        elif text_provider == "vercel":
+            model = _choice(
+                "Gateway text model",
+                (
+                    "openai/gpt-4.1-mini",
+                    "anthropic/claude-sonnet-4.5",
+                    "google/gemini-2.5-flash",
+                    "custom",
+                ),
+                "openai/gpt-4.1-mini",
+            )
+            if model == "custom":
+                model = typer.prompt("Gateway text model ID (provider/model)").strip()
+            app.llm = app.llm.model_copy(
+                update={
+                    "provider": "vercel",
+                    "model": model,
+                    "base_url": HttpUrl("https://ai-gateway.vercel.sh/v1"),
+                }
+            )
         else:
             model = _choice("OpenAI model", ("gpt-4.1-mini", "gpt-4.1"), "gpt-4.1-mini")
             app.llm = app.llm.model_copy(
@@ -268,6 +295,24 @@ def run_setup(root: Path) -> bool:
             )
             production.tts = production.tts.model_copy(
                 update={"engine": "kokoro", "voice": voice, "secondary_voice": None, "speed": 1.0}
+            )
+        elif speech_provider == "vercel":
+            model = _choice(
+                "Gateway speech model (beta)", ("openai/tts-1", "openai/tts-1-hd"), "openai/tts-1"
+            )
+            voice = _choice(
+                "Gateway speech voice",
+                VERCEL_VOICES,
+                "alloy",
+            )
+            production.tts = production.tts.model_copy(
+                update={
+                    "engine": "vercel",
+                    "voice": voice,
+                    "secondary_voice": None,
+                    "speed": 1.0,
+                    "vercel": production.tts.vercel.model_copy(update={"model_id": model}),
+                }
             )
         elif speech_provider == "elevenlabs":
             voice = typer.prompt(
@@ -309,11 +354,21 @@ def run_setup(root: Path) -> bool:
         ]
     )
     keys: dict[str, str] = {}
+    if preferences.generate_audio and preferences.tts.engine == "vercel":
+        _details([("Speech model", preferences.tts.vercel.model_id)])
+        console.print(
+            "Gateway speech is beta. A key does not guarantee access; voice-preview uses gateway credits.",
+            style="yellow",
+        )
     required = []
     if preferences.llm.provider == "openai":
         required.append("OPENAI_API_KEY")
     if preferences.generate_audio and preferences.tts.engine == "elevenlabs":
         required.append("ELEVENLABS_API_KEY")
+    if preferences.llm.provider == "vercel" or (
+        preferences.generate_audio and preferences.tts.engine == "vercel"
+    ):
+        required.append("AI_GATEWAY_API_KEY")
     if required:
         _section("Credentials")
     for name in required:
@@ -347,8 +402,10 @@ def run_setup(root: Path) -> bool:
         console.print(f"  ollama pull {preferences.llm.model}", style="cyan", markup=False)
     elif preferences.llm.provider == "openai":
         console.print("OPENAI_API_KEY is read from the project .env file.")
-    else:
+    elif preferences.llm.provider == "codex":
         console.print("ChatGPT subscription selected. Check allowance with ./show codex-status.")
+    if "AI_GATEWAY_API_KEY" in required:
+        console.print("AI_GATEWAY_API_KEY is read from .env; gateway usage is billed separately.")
     if preferences.generate_audio and preferences.tts.engine == "kokoro":
         console.print("Install the local speech runtime:")
         console.print("  uv sync --dev --extra tts --python 3.12", style="cyan")
