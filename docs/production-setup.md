@@ -15,16 +15,76 @@ output remains readable without ANSI color codes.
 
 | Stage | Local | Cloud |
 | --- | --- | --- |
-| Research, clustering, writing, verification, feedback | Ollama: Qwen3 4B or 8B | OpenAI API: GPT-4.1 mini or GPT-4.1; ChatGPT via Codex: discovered models |
-| Speech | Kokoro: Bella and six other built-in voices | ElevenLabs: an account-accessible Voice ID |
+| Research, clustering, writing, verification, feedback | Ollama: Qwen3 4B or 8B | OpenAI API; ChatGPT via Codex; Vercel AI Gateway |
+| Speech | Kokoro: Bella and six other built-in voices | ElevenLabs; Vercel AI Gateway OpenAI speech (beta) |
 
 Choose local or cloud scripts, or mixed to see all script providers together.
 Every mode then asks separately for audio output: local Kokoro, cloud ElevenLabs,
-or `none`. Cloud scripts can use local Bella speech without selecting mixed.
+Vercel AI Gateway, or `none`. Cloud scripts can use local Bella speech without selecting mixed.
 Choosing `none` disables all speech and MP3 generation; it does not select local
 audio. The review explicitly lists whether an MP3 episode will be produced.
 Existing users can choose `keep` to adopt current settings without changing models.
 `./show configure` still edits editorial interests, not provider preferences.
+
+## Vercel AI Gateway
+
+Run `./show setup`, choose `cloud`, then `vercel` for scripts. Choose `vercel` again
+for gateway speech, or select Kokoro, ElevenLabs, or no audio independently. You
+can also use gateway speech with another script provider through `mixed`.
+
+Setup offers these gateway text models: `openai/gpt-4.1-mini`,
+`anthropic/claude-sonnet-4.5`, and `google/gemini-2.5-flash`. These IDs were present
+in the public gateway catalog on September 14, 2026. `custom` accepts another
+`provider/model` ID; it must support chat completions and JSON output. Catalog
+presence and valid naming do not guarantee your team's access or model quality.
+
+For speech, select `openai/tts-1` or `openai/tts-1-hd`, then alloy, echo, fable,
+onyx, nova, or shimmer. Vercel speech is beta with gradual team access. A gateway
+key alone does not guarantee access. Both stages use `AI_GATEWAY_API_KEY`, entered
+once through a hidden setup prompt and saved only on confirmation to ignored
+`.env` with owner-only permissions. Alternatively, edit `.env` directly:
+
+```dotenv
+AI_GATEWAY_API_KEY=your-gateway-key
+```
+
+The gateway does not use `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, or your ChatGPT
+subscription for these requests. Account credits, billing, routing, and provider
+access are managed in Vercel. MorningShow does not deploy to Vercel or require
+the Vercel CLI. It pins requests to the documented HTTPS gateway endpoints;
+`llm.base_url` cannot redirect credentials to another host.
+
+`./show doctor` checks credential presence without billable inference. It explicitly
+does not verify credits, model eligibility, or speech beta access. After saving:
+
+```bash
+./show doctor
+./show voice-preview
+./show morning
+```
+
+Voice preview generates billable speech. Skip it for script-only production.
+No paid generation was performed during implementation; tests use mocked gateway
+responses, including valid WAV, truncated audio, failures, and credential isolation.
+
+Text requests use the gateway's OpenAI-compatible chat-completions endpoint.
+Schema validation may make up to three billable attempts, as with direct OpenAI;
+HTTP failures and timeouts are not retried by MorningShow. Gateway-side routing
+and failover policies remain controlled by Vercel. Text and editorial context pass
+through Vercel and its selected provider; do not assume zero data retention.
+
+Speech uses the documented v4 speech endpoint with WAV output. Each request is
+limited to 4,096 input characters and a 32 MB JSON response. The adapter decodes
+base64, validates the WAV and frame count, and atomically saves it before the
+existing local mixer adds pauses, music, fades, loudness processing, and MP3 export.
+Provider warnings fail the chunk instead of silently ignoring requested options.
+There are no automatic speech retries or fallbacks; a timeout may still be billed.
+Secrets and raw provider error bodies are excluded from diagnostics. Speech model
+and timeout settings live under `tts.vercel` in `config/providers.local.yaml`;
+voice and speed remain under `tts`.
+
+References: [gateway chat completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/rest-api),
+[gateway speech and beta limitations](https://vercel.com/docs/ai-gateway/modalities/text-to-speech).
 
 ## ChatGPT subscription via Codex
 

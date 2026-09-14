@@ -20,7 +20,7 @@ The operator interface is the repository-root `./show` command:
 
 ## Setup
 
-The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Script providers are Ollama, OpenAI API, or ChatGPT subscription via Codex. Speech providers are Kokoro or ElevenLabs. MP3 generation also needs FFmpeg and FFprobe.
+The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Script providers are Ollama, OpenAI API, ChatGPT subscription via Codex, or Vercel AI Gateway. Speech providers are Kokoro, ElevenLabs, or Vercel AI Gateway (beta). MP3 generation also needs FFmpeg and FFprobe.
 
 ```bash
 uv sync --locked --dev --python 3.12
@@ -42,6 +42,18 @@ form as the value. `inter_block_pause_ms` controls the short pause inserted betw
 paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_words`, with
 `sentence_pause_ms` inserted between those groups. Explicit `[PAUSE: ...]` directives are left
 unchanged.
+
+### Vercel AI Gateway
+
+Run `./show setup` and choose **cloud → vercel** for scripts. For audio, choose
+**vercel** for gateway speech, **kokoro** for local speech, or **none** for no MP3.
+Setup offers text models, speech models, and voices, then prompts once for
+`AI_GATEWAY_API_KEY` and saves it in ignored `.env` on confirmation.
+
+Gateway speech is beta and may not be enabled for your Vercel team. Both text and
+speech use gateway credits, not your ChatGPT subscription. `./show doctor` checks
+credential presence only; `./show voice-preview` generates billable speech.
+See [gateway setup and limitations](docs/production-setup.md#vercel-ai-gateway).
 
 ### ChatGPT Subscription via Codex
 
@@ -89,7 +101,7 @@ The adapter uses the [ElevenLabs speech API](https://elevenlabs.io/docs/api-refe
 - writable `data/`
 - `config/app.yaml`, `config/feeds.yaml`, and `config/production.yaml`
 - SQLite state
-- Ollama reachability and configured model, OpenAI credential presence (not billing/model eligibility), or Codex ChatGPT sign-in and model availability
+- Ollama reachability and configured model, OpenAI or Vercel credential presence (not billing/model eligibility), or Codex ChatGPT sign-in and model availability
 - FFmpeg and FFprobe when audio generation is enabled
 - TTS adapter availability when audio generation is enabled
 - at least one enabled feed
