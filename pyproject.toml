@@ -3,6 +3,8 @@ name = "personal-morning-radio"
 version = "0.1.0"
 description = "Local-first personal morning radio proof of concept."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "feedparser>=6.0.11",

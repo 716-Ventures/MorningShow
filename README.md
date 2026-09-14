@@ -2,6 +2,12 @@
 
 Personal Morning Radio is a deliberately rough, local-first CLI that creates a radio-style morning news episode from an editorial profile.
 
+## License
+
+This project is licensed under the [Apache License, Version 2.0](LICENSE)
+(SPDX: `Apache-2.0`). Third-party dependencies, model weights, news content, and
+user-supplied audio assets remain subject to their respective licenses and terms.
+
 The operator interface is the repository-root `./show` command:
 
 ```bash
