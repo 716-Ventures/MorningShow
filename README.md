@@ -1,36 +1,33 @@
-# Personal Morning Radio POC
+# Personal Morning Radio
 
-Personal Morning Radio is a deliberately rough, local-first CLI that creates a radio-style morning news episode from an editorial profile.
+Personal Morning Radio is a local-first command-line app that turns news matching your interests into a radio-style episode, with a written script, source links, and optional speech and music. Choose local models, hosted providers, or a combination of both.
 
-## License
+**Developer alpha:** expect setup work and occasional failed runs. Generated scripts can contain mistakes; review the sources before relying on or sharing an episode. Automated tests do not establish editorial or voice quality.
 
-This project is licensed under the [Apache License, Version 2.0](LICENSE)
-(SPDX: `Apache-2.0`). Third-party dependencies, model weights, news content, and
-user-supplied audio assets remain subject to their respective licenses and terms.
+## Quick Start
 
-The operator interface is the repository-root `./show` command:
+The intended platform is **macOS on Apple Silicon**, with Python 3.12 or 3.13. Python 3.14 is not supported. These instructions use Python 3.12 and assume Git, Homebrew, and `uv` are installed. Run commands from the repository root:
 
 ```bash
-./show setup
-./show providers
-./show configure
-./show morning
-./show morning --minutes 20
-./show morning --date 2026-08-14
-./show feedback
-./show doctor
-./show voice-preview
-./show codex-login
-./show codex-status
-```
-
-## Setup
-
-The intended runtime is macOS on Apple Silicon with Python 3.12 or 3.13 and `uv`. Python 3.14 is not supported. Run `./show setup` to choose local, cloud, mixed, or script-only production. It inspects this machine and recommends a conservative local model. Script providers are Ollama, OpenAI API, ChatGPT subscription via Codex, or Vercel AI Gateway. Speech providers are Kokoro, ElevenLabs, or Vercel AI Gateway (beta). MP3 generation also needs FFmpeg and FFprobe.
-
-```bash
+git clone https://github.com/716-Ventures/MorningShow.git
+cd MorningShow
 uv sync --locked --dev --python 3.12
 ./show setup
+```
+
+Setup chooses **script generation and audio output separately**. Cloud scripts do not automatically enable local speech. Select `kokoro` for local audio, `elevenlabs` or `vercel` for hosted audio, or `none` for scripts without an MP3. The review confirms what will be produced.
+
+Install the dependencies for your choices before continuing:
+
+- **Any MP3 output:** `brew install ffmpeg` installs FFmpeg and FFprobe.
+- **Local Kokoro speech:** `uv sync --locked --dev --extra tts --python 3.12`. Model files may download on first use; local inference does not require API credits.
+- **Local Ollama scripts:** install and start Ollama, then run the `ollama pull` command printed by setup for your selected model.
+- **Codex scripts:** install the Codex CLI on PATH before selecting it in setup; complete browser sign-in when prompted.
+- **API-backed providers:** enter the corresponding key in setup and ensure your account has access and sufficient credits. Creating a key alone is not enough.
+
+Then check the installation, configure your interests, and create an episode:
+
+```bash
 ./show doctor
 ./show configure
 ./show morning --minutes 10 --no-assets
@@ -38,9 +35,19 @@ uv sync --locked --dev --python 3.12
 
 Generated scripts and intermediate artifacts are written under `runs/YYYY-MM-DD/<run-id>/`, not `data/runs/`. The final command prints the episode and sources paths for audio runs, or script and sources paths for script-only runs.
 
-Setup saves ignored machine-specific preferences in `config/providers.local.yaml`; these override the base `llm`, `tts`, and `generate_audio` settings. Re-run setup to change providers or disable audio. The first interactive generation opens setup automatically; unattended generation requires completing setup first. Your editorial profile is unchanged. See [production setup](docs/production-setup.md) for the provider catalog, recommendation policy, credential handling, and billing limitations.
+`--no-assets` skips music, bumpers, and beds; it does not disable speech synthesis or MP3 export. The requested duration is a target, not a guaranteed episode length. Run `./show morning` again to create another run using your saved preferences.
 
-`--no-assets` excludes music, bumpers, and beds; it does not disable speech synthesis or MP3 export. Install FFmpeg with `brew install ffmpeg`. For local scripts, pull the selected model with `ollama pull MODEL_NAME` and keep Ollama running.
+## Provider Setup
+
+| Stage | Choices |
+| --- | --- |
+| Scripts and editorial processing | Local Ollama, OpenAI API, ChatGPT via Codex, Vercel AI Gateway |
+| Speech | Local Kokoro, ElevenLabs, Vercel AI Gateway (beta), or none |
+| Music mixing and MP3 export | Local FFmpeg |
+
+`mixed` shows all script providers together; audio remains an independent choice in every mode. Use `./show providers` to inspect options without changing settings. Use `./show configure` to change interests, not providers.
+
+Setup saves ignored machine-specific preferences in `config/providers.local.yaml`; these override the base `llm`, `tts`, and `generate_audio` settings. Re-run setup to change providers or disable audio. The first interactive generation opens setup automatically; unattended generation requires completing setup first. Your editorial profile is unchanged. See [production setup](docs/production-setup.md) for the provider catalog, recommendation policy, credential handling, and billing limitations.
 
 Speech preparation is configured under `tts` in `config/providers.local.yaml` after setup (otherwise `config/production.yaml`). Add names or terms to
 `pronunciation_overrides` using the exact written form as the key and a phonetic, listener-facing
@@ -97,7 +104,28 @@ Never put the key in YAML, a profile, a command argument, or Git. `.env` is Git-
 
 Only speech text is sent to ElevenLabs, not the profile or article source files. Hosted requests are billed and subject to ElevenLabs' retention policies; zero-retention mode is not enabled. Speech failures stop the episode, with no silent fallback or automatic paid-request retry. A timeout can occur after billing, so inspect account usage before retrying.
 
-The adapter uses the [ElevenLabs speech API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), wraps 24 kHz mono 16-bit PCM in a real WAV container, and lets the existing mixer perform final resampling, loudness processing, music, and MP3 encoding. Larger sentence-aligned chunks and zero extra chunk pauses let the provider handle phrasing; explicit story pauses remain unchanged. Model/voice settings are under `tts.elevenlabs`, while voice IDs and speed remain under `tts`. The configured speed range is 0.7-1.2. To restore local speech, set `tts.engine: kokoro`, `tts.voice: af_bella`, and install `uv sync --locked --dev --extra tts`.
+The adapter wraps 24 kHz mono 16-bit PCM in a WAV container, and the local mixer handles music, loudness processing, and MP3 encoding. Model settings are under `tts.elevenlabs`; voice and speed remain under `tts`. To restore local speech, re-run setup, choose Kokoro and Bella, and install the `tts` extra using the Quick Start command.
+
+### Keys and Privacy
+
+OpenAI uses `OPENAI_API_KEY`, Vercel uses `AI_GATEWAY_API_KEY`, and ElevenLabs uses `ELEVENLABS_API_KEY`. Setup accepts these through hidden prompts and saves them to ignored `.env` only after confirmation. See [.env.example](.env.example) for the supported names. Do not share `.env` or `data/codex/`.
+
+Hosted text generation sends article and relevant editorial context to the selected service. Hosted speech sends speech text. Run artifacts can contain personal preferences and source material; review diagnostics before sharing them.
+
+`./show voice-preview` uses the configured speech provider even when normal episode audio is disabled. Hosted previews consume credits. MorningShow does not automatically retry failed speech requests or hosted text HTTP failures, but OpenAI and Vercel schema-validation failures can trigger up to three billable attempts. Provider-side retry policies are separate; a timeout may occur after billing.
+
+## Audio Assets
+
+Optional music lives under `assets/opening/`, `assets/closing/`, `assets/bumpers/`, and `assets/beds/`. Run `./show morning` without `--no-assets` to include applicable assets. See [Audio Assets](assets/README.md) for export-level guidance.
+
+## Troubleshooting
+
+- **No MP3:** inspect the saved audio choice. `none` means scripts only.
+- **A short tone:** unset `MORNING_RADIO_FAKE_TTS` and the other fixture variables before a normal run.
+- **Hosted-provider errors:** check the key, credits, model or voice access, and rate limits before retrying a paid request.
+- **Failed episode:** use the printed run ID, failed stage, and suggested diagnostics to inspect the correct directory. A failed run may not contain an MP3.
+
+Run `./show --help`, `./show morning --help`, or `./show feedback --help` for command options.
 
 ## Local Dependencies
 
@@ -132,6 +160,7 @@ Fixture mode is a plumbing check, not a script or voice-quality demonstration. D
 ## Development
 
 ```bash
+uv sync --locked --dev --extra tts --python 3.12
 uv lock --check
 uv run ruff format --check .
 uv run ruff check .
@@ -145,23 +174,29 @@ Every episode writes `performance.json` with monotonic stage durations and proce
 
 Reproducible performance and editorial checks:
 
-`--live` and `--episode` use the configured speech provider. With ElevenLabs selected, they send text to ElevenLabs and consume credits. Only the default fixture benchmark is offline and free of inference charges.
+`--live` currently requires Ollama for scripts. Live benchmarks and `--episode` can consume hosted-provider credits, including Vercel or ElevenLabs speech. These are opt-in developer tools, not cross-provider acceptance tests. Only the default fixture benchmark is offline and free of inference charges.
 
 ```bash
 # Three isolated full-pipeline fixture runs, without real inference.
 uv run python -m morning_radio.benchmark --repeats 3
 
-# Live Qwen/Bella evaluation and first-use/repeat inference measurements.
+# Live Ollama evaluation; speech uses the configured provider.
 uv run python -m morning_radio.benchmark --live --repeats 2
 
 # A full real-model/voice episode using fixed synthetic source material.
 uv run python -m morning_radio.benchmark --episode
 ```
 
-Benchmarks write to unique directories under `runs/benchmarks/` and never update your normal profile or story history. The episode benchmark retains its isolated workspace and diagnostics. `--live` supports `--thinking` and `--no-thinking` for controlled comparisons; normal episodes retain the model's default unless `llm.thinking` is explicitly set in `config/app.yaml`. First-use does not mean a guaranteed cold model load: the benchmark never unloads an already-running model.
+Benchmarks write to unique directories under `runs/benchmarks/` and never update your normal profile or story history. The episode benchmark retains its isolated workspace and diagnostics. `--live` supports `--thinking` and `--no-thinking` for controlled comparisons. Normal Ollama episodes use `llm.thinking` from the effective configuration: local provider preferences override `config/app.yaml`. First-use does not mean a guaranteed cold model load: the benchmark never unloads an already-running model.
 
-LLM requests explicitly use an 8,192-token context by default (`llm.context_tokens`), and scoring considers at most six stories per request. This avoids relying on a smaller server default for multi-story prompts. Larger contexts use more memory; keep this setting conservative on a 16 GB machine.
+Ollama requests use an 8,192-token context by default (`llm.context_tokens`); this setting does not control hosted-provider context limits. Scoring considers at most six stories per request. Larger local contexts use more memory; keep this setting conservative on a 16 GB machine.
 
 The corpus contains synthetic, source-checkable expected outcomes, not independently human-graded listening evaluations. It tests multiple-interest selection, missing-topic days, duplicated/paraphrased events, shared entities, unsupported claims, source prompt injection, and the actual publication verifier.
 
 See [Maintainer Guide](docs/maintainer-guide.md) for module responsibilities, configuration, failure handling, and testing conventions. See [Code Review](docs/code-review-2026-09-09.md) for the original findings and [Follow-up Results](docs/review-followup-2026-09-09.md) for fixes, measured verification, and remaining limitations.
+
+## License
+
+This project is licensed under the [Apache License, Version 2.0](LICENSE)
+(SPDX: `Apache-2.0`). Third-party dependencies, model weights, news content, and
+user-supplied audio assets remain subject to their respective licenses and terms.
