@@ -27,8 +27,8 @@ This is a Python CLI, not a web service. Keep domain logic separate from orchest
 - `config/app.yaml`: Ollama endpoint/model/timeouts, discovery/extraction limits, selection, and verification cycles.
 - `config/feeds.yaml`: discovery feeds. Interests can only select from available source material; a profile cannot create missing coverage.
 - `config/production.yaml`: audio enablement, engine/voices, pronunciation overrides, pauses, MP3 format, and asset optionality.
-- `data/profile.json`: structured listener preferences. `./show configure` updates this and the human-readable `data/profile.md` summary.
-- `data/editorial-memory.md`: editorial feedback memory when present; inspect feedback code before changing its storage contract.
+- `data/profile.json`: private, Git-ignored listener preferences. `./show configure` creates or updates this and the human-readable `data/profile.md` summary. Versioned starter examples live under `examples/`, never in runtime `data/`.
+- `data/editorial-memory.md`: private, Git-ignored editorial feedback memory when present; inspect feedback code before changing its storage contract. The entire `data/` tree, including backups and database sidecars, must remain untracked.
 - `data/app.db`: run/story history. Back it up before manual schema or history changes.
 - `runs/YYYY-MM-DD/<run-id>/`: intermediate JSON, model diagnostics, scripts, audio manifests, FFmpeg commands/stderr, and final outputs. Failed runs are evidence, not successful episodes.
 

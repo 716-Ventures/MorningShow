@@ -110,6 +110,14 @@ The adapter wraps 24 kHz mono 16-bit PCM in a WAV container, and the local mixer
 
 OpenAI uses `OPENAI_API_KEY`, Vercel uses `AI_GATEWAY_API_KEY`, and ElevenLabs uses `ELEVENLABS_API_KEY`. Setup accepts these through hidden prompts and saves them to ignored `.env` only after confirmation. See [.env.example](.env.example) for the supported names. Do not share `.env` or `data/codex/`.
 
+The entire `data/` directory is private runtime state and is Git-ignored, including
+profiles, editorial feedback, backups, databases, and auth files. `.env.*` files
+are also ignored except the blank `.env.example`. New checkouts must run
+`./show configure`; illustrative profiles live separately in [examples/](examples/README.md).
+Existing users should back up `data/` before updating across this change: Git may
+remove previously tracked, unmodified starter files during checkout. Restore
+personal backups into `data/` afterward; do not force-add runtime files to Git.
+
 Hosted text generation sends article and relevant editorial context to the selected service. Hosted speech sends speech text. Run artifacts can contain personal preferences and source material; review diagnostics before sharing them.
 
 `./show voice-preview` uses the configured speech provider even when normal episode audio is disabled. Hosted previews consume credits. MorningShow does not automatically retry failed speech requests or hosted text HTTP failures, but OpenAI and Vercel schema-validation failures can trigger up to three billable attempts. Provider-side retry policies are separate; a timeout may occur after billing.

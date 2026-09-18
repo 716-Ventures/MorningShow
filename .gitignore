@@ -7,10 +7,12 @@ htmlcov/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 config/providers.local.yaml
 .DS_Store
-data/app.db
-data/codex/
+# Personal profiles, editorial memory/backups, SQLite sidecars, and auth state.
+/data/
 runs/
 *.wav
 *.mp3
