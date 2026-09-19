@@ -415,6 +415,50 @@ def test_large_verification_checks_every_passage_and_whole_script(tmp_path: Path
     assert llm.payloads[3]["script"] == script
 
 
+def test_follow_up_paragraphs_keep_story_evidence(tmp_path: Path) -> None:
+    dossiers = large_dossiers()
+    extractions = [
+        ExtractionResult(
+            candidate_id=f"source-{index}",
+            url=f"https://example.com/{index}",
+            text=f"{name} released details. No release date was announced.",
+            word_count=10,
+            extraction_status="usable",
+        )
+        for index, name in enumerate(("Apple", "Buffalo"))
+    ]
+    llm = PassageLLM()
+    script = (
+        "[HOST]\nGood morning.\n\nApple released details.\n\n"
+        "No release date was announced.\nMore information is expected.\n"
+        "[PAUSE: 650]\n[HOST]\nBuffalo released details.\n\n"
+        "No release date was announced.\n[BUMPER: bumper]\n[HOST]\nGoodbye.\n"
+    )
+    result = verify_script(script, dossiers, tmp_path, llm, extractions=extractions)
+    assert result.verification.status == "pass"
+    assert result.script == script
+    assert [
+        [source["candidate_id"] for source in payload["source_evidence"]]
+        for payload in llm.payloads[:-1]
+    ] == [[], ["source-0"], ["source-0"], ["source-0"], ["source-1"], ["source-1"], []]
+
+
+@pytest.mark.parametrize(
+    "boundary", ["[HOST]", "[HOST 2]", "[PAUSE: 650]\n[HOST]", "[BUMPER: bumper]\n[HOST]"]
+)
+def test_story_evidence_does_not_leak_across_boundaries(tmp_path, boundary):
+    llm = PassageLLM()
+    verify_script(
+        f"[HOST]\nApple released details.\n{boundary}\nUnrelated factual claim.\n"
+        "[HOST]\nBuffalo released details.\n",
+        large_dossiers(),
+        tmp_path,
+        llm,
+    )
+    assert llm.payloads[1]["dossiers"] == []
+    assert llm.payloads[1]["source_evidence"] == []
+
+
 def test_passage_verification_retains_show_date(tmp_path: Path) -> None:
     from morning_radio.showgen.verify import _verify_passages
 
@@ -487,6 +531,8 @@ def test_invalid_passage_correction_never_changes_production(tmp_path, correctio
     )
     assert result.verification.status == "fail"
     assert result.verification.issues[0].category == "script_structure"
+    assert result.verification.issues[0].script_excerpt == "Apple released details."
+    assert result.verification.issues[1].category == "unsupported_claim"
     assert not (tmp_path / "script-final.md").exists()
 
 

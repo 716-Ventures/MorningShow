@@ -193,14 +193,22 @@ def _verify_passages(
     sections = match_story_sections(script, dossiers)
     lines = script.splitlines(keepends=True)
     host = "HOST"
+    relevant: list[StoryDossier] = []
     correction_issues: list[VerificationIssue] = []
     for index, line in enumerate(lines):
         text = line.strip()
         if text in {"[HOST]", "[HOST 2]"}:
             host = text.strip("[]")
-        if not text or text.startswith("["):
+        if text.startswith("["):
+            relevant = []
             continue
-        relevant = [dossier for dossier in dossiers if sections.get(dossier.cluster_id) == text]
+        if not text:
+            continue
+        matched = [dossier for dossier in dossiers if sections.get(dossier.cluster_id) == text]
+        if matched:
+            relevant = matched
+        # Follow-up paragraphs in the same uninterrupted host section share the
+        # story's evidence. A production cue or new host ends that association.
         # Unmatched transitions receive no factual evidence: unsupported claims must fail,
         # not disappear from the gate because they were outside a matched story body.
         prompt = json.dumps(
@@ -237,7 +245,10 @@ def _verify_passages(
                     if not copy:
                         raise ScriptError("Passage correction may not remove the entire passage.")
                 except ScriptError as exc:
-                    return _script_structure_failure(str(exc)), None
+                    failure = _script_structure_failure(str(exc))
+                    failure.issues[0].script_excerpt = text
+                    failure.issues.extend(result.issues)
+                    return failure, None
                 if copy == text:
                     return result, None
                 lines[index] = copy + ("\n" if line.endswith("\n") else "")
