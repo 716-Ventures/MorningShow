@@ -220,7 +220,14 @@ def _verify_passages(
                 "script": f"[{host}]\n{text}\n",
                 "show_date": rundown.show_date.isoformat() if rundown is not None else None,
                 "show_metadata": {"story_count": len(dossiers)},
-                "dossiers": [item.model_dump(mode="json") for item in relevant],
+                "dossiers": [
+                    {
+                        "cluster_id": item.cluster_id,
+                        "working_headline": item.working_headline,
+                        "source_ids": item.source_ids,
+                    }
+                    for item in relevant
+                ],
                 "source_evidence": compact_source_evidence(relevant, extractions, passage=text),
                 "correction_cycle": cycle,
             },
@@ -364,6 +371,8 @@ def compact_source_evidence(
     passage: str | None = None,
 ) -> list[dict[str, Any]]:
     relevant_ids = {source_id for dossier in dossiers for source_id in dossier.source_ids}
+    source_count = sum(extraction.candidate_id in relevant_ids for extraction in extractions)
+    excerpt_budget = min(6000, 6000 // max(1, min(12, source_count))) if passage else 3000
     return [
         {
             "candidate_id": extraction.candidate_id,
@@ -371,24 +380,30 @@ def compact_source_evidence(
             "published_at": extraction.published_at.isoformat()
             if extraction.published_at
             else None,
-            "text_excerpt": _passage_evidence(extraction.text, passage),
+            "text_excerpt": _passage_evidence(extraction.text, passage, excerpt_budget),
         }
         for extraction in extractions
         if extraction.candidate_id in relevant_ids
     ][:12]
 
 
-def _passage_evidence(text: str, passage: str | None) -> str:
+def _passage_evidence(text: str, passage: str | None, budget: int = 3000) -> str:
     """Retrieve verbatim windows from the same 6,000 characters research receives.
 
     Keep the existing per-source context budget. Windows overlap to reduce boundary
     loss and are emitted in source order; omitted text is explicitly marked.
     """
-    if passage is None or len(text) <= 3000:
-        return text[:3000]
+    if passage is None or len(text) <= budget:
+        return text[:budget]
     source = text[:6000]
+    if len(source) <= budget:
+        return source
     terms = set(re.findall(r"\b\w{4,}\b", passage.casefold()))
-    windows = [(start, min(start + 700, len(source))) for start in range(0, len(source), 550)]
+    window_size = min(700, budget)
+    windows = [
+        (start, min(start + window_size, len(source)))
+        for start in range(0, len(source), max(1, window_size - 150))
+    ]
     ranked = sorted(
         windows,
         key=lambda span: (
@@ -396,7 +411,7 @@ def _passage_evidence(text: str, passage: str | None) -> str:
             span[0],
         ),
     )
-    selected = sorted(ranked[:4])
+    selected = sorted(ranked[: max(1, (budget + 30) // (window_size + 30))])
     merged: list[tuple[int, int]] = []
     for start, end in selected:
         if merged and start <= merged[-1][1]:

@@ -635,6 +635,21 @@ def test_passage_evidence_does_not_invent_or_exceed_research_context():
     )
 
 
+def test_single_source_passage_receives_entire_research_excerpt():
+    from morning_radio.showgen.verify import compact_source_evidence
+
+    dossier = valid_dossier()
+    source = ExtractionResult(
+        candidate_id=dossier.source_ids[0],
+        url="https://example.com/story",
+        text="a" * 7000,
+        word_count=1000,
+        extraction_status="usable",
+    )
+    evidence = compact_source_evidence([dossier], [source], passage="Article details.")
+    assert evidence[0]["text_excerpt"] == source.text[:6000]
+
+
 def test_urls_fail_without_calling_model(tmp_path):
     llm = CorrectingLLM()
     result = verify_script("[HOST]\nVisit https://example.com/news today.\n", [], tmp_path, llm)
