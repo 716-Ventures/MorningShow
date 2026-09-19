@@ -202,7 +202,10 @@ def _run_pipeline(
         )
         if unavailable is not None:
             raise VerificationUnavailableError(unavailable.explanation)
-        raise RuntimeError("Verification failed with high-severity issues.")
+        categories = ", ".join(
+            dict.fromkeys(issue.category for issue in verified.verification.issues)
+        )
+        raise RuntimeError(f"Verification failed: {categories or 'editorial gate did not pass'}.")
     final_script = verified.script
     script_path = context.run_dir / "script-final.md"
     context.register_artifact("script_final", script_path)

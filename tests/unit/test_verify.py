@@ -481,6 +481,27 @@ def test_passage_verification_retains_show_date(tmp_path: Path) -> None:
         "[HOST]\nApple released details.\n", large_dossiers(), [], tmp_path, llm, 0, None, rundown
     )
     assert llm.payloads[0]["show_date"] == "2026-09-09"
+    assert llm.payloads[0]["show_metadata"] == {"story_count": 2}
+
+
+def test_editorial_overview_does_not_repeat_large_profile(tmp_path):
+    from morning_radio.showgen.verify import _verify_passages
+
+    llm = PassageLLM()
+    result, _ = _verify_passages(
+        "[HOST]\nApple released details.\n",
+        large_dossiers(),
+        [],
+        tmp_path,
+        llm,
+        0,
+        {"irrelevant_context": "x" * 14000},
+        None,
+    )
+    assert result.status == "pass"
+    assert "profile" not in llm.payloads[-1]
+    assert "rundown" not in llm.payloads[-1]
+    assert llm.payloads[-1]["show_metadata"] == {"story_count": 2}
 
 
 def test_one_unavailable_passage_blocks_whole_episode(tmp_path: Path) -> None:
@@ -585,6 +606,33 @@ def test_correction_after_limit_is_not_published(tmp_path):
     assert result.script == original
     assert result.verification.issues[0].category == "correction_cycle_limit"
     assert not (tmp_path / "script-final.md").exists()
+    assert result.verification.issues[1].category == "unsupported_claim"
+    assert (
+        tmp_path / "script-pending-verification.md"
+    ).read_text() == "[HOST]\nCorrected script.\n"
+
+
+def test_passage_evidence_retrieves_later_research_context():
+    from morning_radio.showgen.verify import _passage_evidence
+
+    detail = "Buffalo has ten days between games to recover before Wednesday practice."
+    source = "Unrelated background. " * 170 + detail + " Further context." * 100
+    evidence = _passage_evidence(source, detail)
+    assert detail in evidence
+    assert len(evidence) <= 3000
+    assert _passage_evidence(source, None) == source[:3000]
+    assert _passage_evidence(detail, detail) == detail
+
+
+def test_passage_evidence_does_not_invent_or_exceed_research_context():
+    from morning_radio.showgen.verify import _passage_evidence
+
+    source = "Original background. " * 400
+    evidence = _passage_evidence(source + "Secret unsupported fact.", "Secret unsupported fact.")
+    assert "Secret unsupported fact." not in evidence
+    assert all(
+        part in source[:6000] for part in evidence.split("\n[... source text omitted ...]\n")
+    )
 
 
 def test_urls_fail_without_calling_model(tmp_path):

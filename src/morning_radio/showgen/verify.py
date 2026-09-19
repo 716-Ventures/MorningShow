@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -81,10 +82,12 @@ def verify_script(
                         explanation="Verifier returned a corrected script after all correction cycles.",
                         supporting_source_ids=[],
                         required_action="increase_cycles_or_rewrite",
-                    )
+                    ),
+                    *result.issues,
                 ],
                 corrected_script_required=True,
             )
+            atomic_write_text(run_dir / "script-pending-verification.md", corrected_script)
             _persist(result, run_dir)
             return VerifiedScript(verification=result, script=current_script)
         if result.status == "pass":
@@ -213,11 +216,12 @@ def _verify_passages(
         # not disappear from the gate because they were outside a matched story body.
         prompt = json.dumps(
             {
-                "task": "Verify every claim in this passage against source_evidence. Dossiers are not independent evidence. Ordinary greetings need no citation. Return corrections for this passage only, under its host marker.",
+                "task": "Verify every news claim in this passage against source_evidence. Dossiers are not independent evidence. Show metadata establishes the episode date and story count; those production facts do not require news-source citations. Ordinary greetings need no citation. Return corrections for this passage only, under its host marker. Check all claims in one pass. Make only the necessary edits; preserve supported wording and introduce no new claims, implications or stylistic rewrites. Recheck your proposed correction against the evidence before returning it.",
                 "script": f"[{host}]\n{text}\n",
                 "show_date": rundown.show_date.isoformat() if rundown is not None else None,
+                "show_metadata": {"story_count": len(dossiers)},
                 "dossiers": [item.model_dump(mode="json") for item in relevant],
-                "source_evidence": compact_source_evidence(relevant, extractions),
+                "source_evidence": compact_source_evidence(relevant, extractions, passage=text),
                 "correction_cycle": cycle,
             },
             ensure_ascii=False,
@@ -265,8 +269,8 @@ def _verify_passages(
         {
             "task": "All passages have passed source verification separately. Check this complete script ONLY for duplicate coverage and awkward spoken copy. Do not repeat factual verification without the source evidence. Return the complete script if correcting editorial issues.",
             "script": script,
-            "profile": _dump_optional_model(profile),
-            "rundown": _dump_optional_model(rundown),
+            "show_date": rundown.show_date.isoformat() if rundown is not None else None,
+            "show_metadata": {"story_count": len(dossiers)},
             "correction_cycle": cycle,
         },
         ensure_ascii=False,
@@ -356,6 +360,8 @@ def _dump_optional_model(value: Any | None) -> Any | None:
 def compact_source_evidence(
     dossiers: list[StoryDossier],
     extractions: list[ExtractionResult],
+    *,
+    passage: str | None = None,
 ) -> list[dict[str, Any]]:
     relevant_ids = {source_id for dossier in dossiers for source_id in dossier.source_ids}
     return [
@@ -365,11 +371,39 @@ def compact_source_evidence(
             "published_at": extraction.published_at.isoformat()
             if extraction.published_at
             else None,
-            "text_excerpt": extraction.text[:3000],
+            "text_excerpt": _passage_evidence(extraction.text, passage),
         }
         for extraction in extractions
         if extraction.candidate_id in relevant_ids
     ][:12]
+
+
+def _passage_evidence(text: str, passage: str | None) -> str:
+    """Retrieve verbatim windows from the same 6,000 characters research receives.
+
+    Keep the existing per-source context budget. Windows overlap to reduce boundary
+    loss and are emitted in source order; omitted text is explicitly marked.
+    """
+    if passage is None or len(text) <= 3000:
+        return text[:3000]
+    source = text[:6000]
+    terms = set(re.findall(r"\b\w{4,}\b", passage.casefold()))
+    windows = [(start, min(start + 700, len(source))) for start in range(0, len(source), 550)]
+    ranked = sorted(
+        windows,
+        key=lambda span: (
+            -len(terms & set(re.findall(r"\b\w{4,}\b", source[span[0] : span[1]].casefold()))),
+            span[0],
+        ),
+    )
+    selected = sorted(ranked[:4])
+    merged: list[tuple[int, int]] = []
+    for start, end in selected:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return "\n[... source text omitted ...]\n".join(source[start:end] for start, end in merged)
 
 
 def _persist(result: VerificationResult, run_dir: Path) -> None:

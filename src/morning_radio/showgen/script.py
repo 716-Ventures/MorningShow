@@ -308,28 +308,64 @@ def add_standard_production_directives(
             ["[BED: STOP]", "[BUMPER: Headlines]"] if story_number == 0 else ["[BUMPER: bumper]"]
         )
         insert_before.setdefault(marker_index, []).extend(directives)
+        if marker_index == story_index:
+            insert_before[marker_index].append(active_host_marker(tokens, story_index))
 
     if profile.show_format.watch_list_close:
         closing_index = next(
             (index for index, item in enumerate(tokens) if item == "[MUSIC: CLOSING]"),
             len(tokens),
         )
+        boundary = next(
+            (
+                index
+                for index in range(ordered_story_indexes[-1] + 1, closing_index)
+                if tokens[index].startswith("[")
+            ),
+            closing_index,
+        )
         candidates = [
             index
-            for index in range(ordered_story_indexes[-1] + 1, closing_index)
+            for index in range(boundary, closing_index)
             if not tokens[index].startswith("[")
             and not tokens[index].casefold().startswith(("that's the show", "that is the show"))
         ]
         if candidates:
             marker_index = preceding_host_index(tokens, candidates[0])
             insert_before.setdefault(marker_index, []).append("[BUMPER: What to Watch]")
+            if marker_index == candidates[0]:
+                insert_before[marker_index].append(active_host_marker(tokens, marker_index))
+        else:
+            # Do not mistake the last story's continuation for the watch-list close.
+            farewell = next(
+                (
+                    index
+                    for index in range(ordered_story_indexes[-1] + 1, closing_index)
+                    if tokens[index].casefold().startswith(("that's the show", "that is the show"))
+                ),
+                closing_index,
+            )
+            marker_index = preceding_host_index(tokens, farewell)
+            insert_before.setdefault(marker_index, []).extend(
+                ["[BUMPER: What to Watch]", "[HOST]", watch_list_sentence(dossiers)]
+            )
+            if farewell < closing_index and marker_index == farewell:
+                insert_before[marker_index].append(active_host_marker(tokens, farewell))
 
     output: list[str] = []
     for index, item in enumerate(tokens):
         output.extend(insert_before.get(index, []))
         output.append(item)
         output.extend(insert_after.get(index, []))
+    output.extend(insert_before.get(len(tokens), []))
     return "\n\n".join(output) + "\n"
+
+
+def active_host_marker(tokens: list[str], index: int) -> str:
+    return next(
+        (token for token in reversed(tokens[:index]) if token in {"[HOST]", "[HOST 2]"}),
+        "[HOST]",
+    )
 
 
 def preceding_host_index(tokens: list[str], spoken_index: int) -> int:

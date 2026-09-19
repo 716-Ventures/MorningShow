@@ -260,6 +260,34 @@ def test_duration_in_range_does_not_call_model():
     assert script_module.adjust_script_duration_if_needed(text, plan, FailingScriptLLM()) == text
 
 
+@pytest.mark.parametrize("host", ["HOST", "HOST 2"])
+def test_production_cues_preserve_multi_paragraph_story_and_host(host):
+    body = story_script_paragraph(dossier())
+    continuation = "The schedule provides some breathing room for the participants."
+    source = (
+        f"[MUSIC: OPENING]\n[{host}]\nGood morning.\n\n{body}\n\n{continuation}\n"
+        "[PAUSE: 650]\n[HOST]\nI'll keep an eye on how this develops.\n"
+        "[HOST]\nThat's the show for now.\n[MUSIC: CLOSING]\n"
+    )
+    result = finalize_script(source, profile(), [dossier()])
+    validate_script(result)
+    script_module.validate_production_directives(result, profile(), [dossier()])
+    assert f"[BUMPER: Headlines]\n\n[{host}]\n\n{body}" in result
+    assert result.index(continuation) < result.index("[BUMPER: What to Watch]")
+    assert finalize_script(result, profile(), [dossier()]) == result
+
+
+@pytest.mark.parametrize("ending", ["[HOST]\nThat's the show for now.\n[MUSIC: CLOSING]\n", ""])
+def test_missing_watch_list_gets_separate_close_not_story_interruption(ending):
+    body = story_script_paragraph(dossier())
+    source = f"[MUSIC: OPENING]\n[HOST]\n{body}\n\nAdditional details remain uncertain.\n{ending}"
+    result = finalize_script(source, profile(), [dossier()])
+    validate_script(result)
+    script_module.validate_production_directives(result, profile(), [dossier()])
+    assert result.index("Additional details") < result.index("[BUMPER: What to Watch]")
+    assert finalize_script(result, profile(), [dossier()]) == result
+
+
 @pytest.mark.parametrize(
     ("items", "expected"),
     [
