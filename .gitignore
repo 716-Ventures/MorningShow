@@ -10,6 +10,7 @@ venv/
 .env.*
 !.env.example
 config/providers.local.yaml
+config/decisions.local.yaml
 .DS_Store
 # Personal profiles, editorial memory/backups, SQLite sidecars, and auth state.
 /data/

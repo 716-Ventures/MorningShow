@@ -30,6 +30,8 @@ def test_runtime_state_and_dotenv_variants_are_ignored(tmp_path: Path) -> None:
         "data/codex/home/auth.json",
         "runs/example/script-final.md",
         "config/providers.local.yaml",
+        "config/decisions.local.yaml",
+        "runs/example/logs/jev-shadow.json",
     ]
     public_paths = [".env.example", "examples/profile.json", "examples/profile.md"]
     result = subprocess.run(

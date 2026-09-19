@@ -56,6 +56,14 @@ paragraphs. Long paragraphs are split at sentence boundaries using `max_chunk_wo
 `sentence_pause_ms` inserted between those groups. Explicit `[PAUSE: ...]` directives are left
 unchanged.
 
+### Jev Editorial Evaluation
+
+Optional Jev shadow mode compares duplicate-story decisions and interest relevance
+without changing your episodes. It uses TypeSafe's cloud API independently of
+script and speech providers, adds evaluation time and API usage, and is off by
+default. Put `TYPESAFE_API_KEY` in `.env` and follow the
+[setup and evaluation guide](docs/jev.md). Results stay in ignored run artifacts.
+
 ### Vercel AI Gateway
 
 Run `./show setup` and choose **cloud → vercel** for scripts. For audio, choose

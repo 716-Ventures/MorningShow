@@ -28,10 +28,13 @@ def isolated_root(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("generate_audio", [False, True])
+@pytest.mark.parametrize("shadow", [False, True])
 def test_fixture_morning_run_completes_in_isolated_root(
-    monkeypatch, tmp_path: Path, generate_audio: bool
+    monkeypatch, tmp_path: Path, generate_audio: bool, shadow: bool
 ) -> None:
     root = isolated_root(tmp_path)
+    if shadow:
+        (root / "config/decisions.local.yaml").write_text("mode: shadow\n")
     config_path = root / "config" / "production.yaml"
     config = yaml.safe_load(config_path.read_text())
     config["generate_audio"] = generate_audio
@@ -51,6 +54,10 @@ def test_fixture_morning_run_completes_in_isolated_root(
     assert stories > 0
 
     run_dir = root / "runs" / "2026-08-14" / result.run_id
+    shadow_path = run_dir / "logs/jev-shadow.json"
+    assert shadow_path.exists() == shadow
+    if shadow:
+        assert json.loads(shadow_path.read_text())["reason"] == "fixture_run"
     assert (run_dir / "episode.mp3").exists() == generate_audio
     assert (run_dir / "production-plan.json").exists() == generate_audio
     metrics = json.loads((run_dir / "performance.json").read_text())

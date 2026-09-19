@@ -1,0 +1,6 @@
+# Copy to decisions.local.yaml to opt into cloud evaluation.
+# Production decisions are unchanged; API calls can incur charges.
+mode: shadow
+model: jev-latest
+timeout_seconds: 5
+max_calls_per_stage: 20

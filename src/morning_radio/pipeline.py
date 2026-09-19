@@ -21,6 +21,7 @@ from morning_radio.audio.production import (
     synthesize_script,
     write_production_plan,
 )
+from morning_radio.decisions import run_shadow
 from morning_radio.dependencies import morning_preflight
 from morning_radio.llm.client import LLMClient, OllamaClient, build_llm_client
 from morning_radio.llm.codex import CodexClient
@@ -151,6 +152,11 @@ def _run_pipeline(
         editorial_memory_path=context.root / "data" / "editorial-memory.md",
         db_path=context.root / "data" / "app.db",
     )
+    shadow_path = run_shadow(
+        app_settings.decisions, context.run_dir, candidates, extractions, clusters, scores, profile
+    )
+    if shadow_path is not None:
+        context.register_artifact("jev_shadow", shadow_path)
     selected = select_stories(
         scores,
         profile,

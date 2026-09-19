@@ -67,11 +67,21 @@ class VerificationSettings(Configuration):
     maximum_correction_cycles: int = Field(ge=0, le=5)
 
 
+class DecisionSettings(Configuration):
+    """Optional editorial evaluation; shadow results never affect production."""
+
+    mode: Literal["off", "shadow"] = "off"
+    model: str = Field(default="jev-latest", min_length=1, max_length=100)
+    timeout_seconds: float = Field(default=5, gt=0, le=30)
+    max_calls_per_stage: int = Field(default=20, ge=1, le=100)
+
+
 class AppSettings(Configuration):
     llm: LLMSettings
     news: NewsSettings
     selection: SelectionSettings
     verification: VerificationSettings
+    decisions: DecisionSettings = Field(default_factory=DecisionSettings)
 
 
 class ElevenLabsSettings(Configuration):
@@ -201,6 +211,9 @@ def _validated[TSettings: BaseModel](model: type[TSettings], path: Path) -> TSet
 def load_app_settings(root: Path | None = None) -> AppSettings:
     base = root or repo_root()
     settings = _validated(AppSettings, base / "config" / "app.yaml")
+    decisions_path = base / "config" / "decisions.local.yaml"
+    if decisions_path.exists():
+        settings.decisions = _validated(DecisionSettings, decisions_path)
     preferences = load_provider_preferences(base)
     if preferences is not None:
         settings.llm = preferences.llm

@@ -51,6 +51,20 @@ def test_missing_config_fails(tmp_path: Path) -> None:
         load_app_settings(tmp_path)
 
 
+def test_decision_settings_default_and_local_override(tmp_path: Path) -> None:
+    copy_config(tmp_path)
+    assert load_app_settings(tmp_path).decisions.mode == "off"
+    path = tmp_path / "config/decisions.local.yaml"
+    path.write_text("mode: shadow\nmodel: jev-test\nmax_calls_per_stage: 3\n")
+    settings = load_app_settings(tmp_path)
+    assert settings.decisions.mode == "shadow"
+    assert settings.decisions.model == "jev-test"
+    assert settings.decisions.max_calls_per_stage == 3
+    path.write_text("mode: active\n")
+    with pytest.raises(ConfigError):
+        load_app_settings(tmp_path)
+
+
 @pytest.mark.parametrize("field,value", [("engine", "unknown"), ("speeed", 1.0)])
 def test_tts_config_rejects_unknown_values(tmp_path, field, value):
     import json
