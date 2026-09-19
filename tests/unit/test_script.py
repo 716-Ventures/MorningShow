@@ -89,6 +89,8 @@ def test_internal_editorial_language_fails() -> None:
         "The editorial pipeline selected this item.",
         "The story scored highly in relevance scoring.",
         "The script validation check passed.",
+        "Our model output was selected for this episode.",
+        "The model output for this script contains seven stories.",
     ],
 )
 def test_contextual_internal_editorial_language_fails(copy: str) -> None:
@@ -103,6 +105,8 @@ def test_contextual_internal_editorial_language_fails(copy: str) -> None:
         "Josh Allen scored on the opening drive.",
         "The oil pipeline will remain closed today.",
         "The treatment is awaiting clinical validation.",
+        "Officials treated the model output as verified intelligence.",
+        "Researchers checked the model output against the original documents.",
     ],
 )
 def test_internal_editorial_guard_does_not_match_parts_of_listener_words(copy: str) -> None:
@@ -250,6 +254,7 @@ def test_model_script_is_adjusted_validated_and_persisted(tmp_path):
     assert model.calls[1][0]["target_seconds"] == 180
     assert body in result
     assert (tmp_path / "script-draft.md").read_text() == result
+    assert (tmp_path / "script-model-draft.md").read_text() == copy
     assert not (tmp_path / "logs/script-fallback.json").exists()
 
 

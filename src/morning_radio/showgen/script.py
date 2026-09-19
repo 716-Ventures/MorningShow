@@ -32,7 +32,6 @@ INTERNAL_EDITORIAL_LANGUAGE = (
     "final score",
     "included because",
     "matched interests",
-    "model output",
     "relevance score",
     "score of",
     "selected story",
@@ -42,6 +41,10 @@ INTERNAL_EDITORIAL_LANGUAGE = (
     "why this was selected",
 )
 CONTEXTUAL_EDITORIAL_LANGUAGE = {
+    "model output": re.compile(
+        r"\b(?:our|this show's|the show's|the script's) model output\b|"
+        r"\bmodel output (?:for|used (?:in|for)) (?:this|the) (?:script|show|episode)\b"
+    ),
     "pipeline": re.compile(
         r"\b(?:editorial|generation|newsroom|writing) pipeline\b|"
         r"\bpipeline (?:generated|included|ranked|selected)\b"
@@ -118,6 +121,7 @@ def write_script(
                 stage="writing",
                 prompt_type="script",
             )
+            atomic_write_text(run_dir / "script-model-draft.md", response.script)
             script = finalize_script(response.script, profile, dossiers)
             validate_script(script)
             validate_script_quality(script, rundown, dossiers)
